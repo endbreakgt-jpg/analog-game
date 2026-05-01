@@ -137,6 +137,29 @@
         </div>
     </div>
 
+    <!-- 効果: 国家備蓄 — 手札交換 -->
+    <div id="stockpile-exchange-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:900px; width:95%;">
+            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 国家備蓄の効果</h2>
+            <p style="margin-bottom:6px;">手札を最大2枚まで破棄し、同じ枚数だけ好きな基本資源を得ます（0枚でもOK）。</p>
+            <p id="stockpile-count" style="font-size:0.9rem; color:var(--accent-red); margin-bottom:12px;">破棄: 0枚 / 獲得: 0枚</p>
+            <div style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap; margin:15px 0;">
+                <div style="min-width:280px;">
+                    <p style="font-size:0.9rem; margin-bottom:6px;">破棄する手札</p>
+                    <div id="stockpile-hand-cards" class="card-row" style="justify-content:center;"></div>
+                </div>
+                <div style="min-width:280px;">
+                    <p style="font-size:0.9rem; margin-bottom:6px;">得る基本資源</p>
+                    <div id="stockpile-gain-cards" class="card-row" style="justify-content:center;"></div>
+                </div>
+            </div>
+            <button id="btn-stockpile-confirm" class="btn primary-btn"
+                style="font-size:1.1rem; padding:8px 28px;">決定</button>
+        </div>
+    </div>
+
     <!-- 効果: 工房街整備 — AP不要加工所建設 -->
     <div id="free-plant-overlay" class="hidden"
         style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
@@ -211,7 +234,7 @@
                         <!-- 需要カードがここに入る -->
                     </div>
                     <div class="action-buttons">
-                        <button id="btn-achieve-demand" class="btn action-btn">需要達成 (ターン1回/無料)</button>
+                        <button id="btn-achieve-demand" class="btn action-btn">需要達成 (無料)</button>
                     </div>
                 </div>
 

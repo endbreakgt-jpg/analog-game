@@ -22,7 +22,7 @@ export class GameState {
         this.startPlayerIndex = 0;
         this.devPlayerIndex = 0;
         this.maxHandSize = 8;
-        this.turnState = { demandAchieved: false, roleAchieved: false };
+        this.turnState = { demandAchieved: false, demandAchieveCount: 0, roleAchieved: false };
 
         this.onStateChange = null;
     }
@@ -177,7 +177,13 @@ export class GameState {
             return;
         }
 
-        this.turnState = { demandAchieved: false, roleAchieved: false, freeProcessingPlant: false, discountedExchange: false };
+        this.turnState = {
+            demandAchieved: false,
+            demandAchieveCount: 0,
+            roleAchieved: false,
+            freeProcessingPlant: false,
+            discountedExchange: false
+        };
         this.phase = 'playing';
         const p = this.getCurrentPlayer();
 
@@ -214,6 +220,42 @@ export class GameState {
         import('./data.js').then(({ Resources }) => {
             logger.log(`${p.name} が食料市の効果で ${Resources[resourceId].name} を得ました。`);
         });
+        this.phase = 'playing';
+        this.notifyChange();
+    }
+
+    // 効果: 国家備蓄 — 手札を最大2枚交換し、同数の基本資源を得る
+    completeStockpileExchange(playerId, discardIndices, resourceIds) {
+        const p = this.players.find(x => x.id === playerId);
+        if (!p) return;
+
+        const discards = [...discardIndices].slice(0, 2);
+        const gains = [...resourceIds].slice(0, 2);
+
+        if (discards.length !== gains.length) {
+            logger.log('【警告】国家備蓄の破棄枚数と獲得枚数が一致しないため、効果を中断しました。');
+            this.phase = 'playing';
+            this.notifyChange();
+            return;
+        }
+
+        const discardedCards = discards
+            .sort((a, b) => b - a)
+            .map(idx => p.hand.splice(idx, 1)[0])
+            .filter(Boolean);
+
+        p.hand.push(...gains);
+
+        import('./data.js').then(({ Resources }) => {
+            const discardedText = discardedCards.length > 0
+                ? discardedCards.map(id => Resources[id].name).join(', ')
+                : 'なし';
+            const gainedText = gains.length > 0
+                ? gains.map(id => Resources[id].name).join(', ')
+                : 'なし';
+            logger.log(`${p.name} が国家備蓄の効果を解決しました。破棄: ${discardedText} / 獲得: ${gainedText}`);
+        });
+
         this.phase = 'playing';
         this.notifyChange();
     }
@@ -367,7 +409,7 @@ export class GameState {
         logger.log('====== 最終結果 ======');
         logger.log(`プレイ人数: ${this.players.length}人`);
 
-        import('./data.js').then(({ Demands, FixedRoles }) => {
+        import('./data.js').then(({ Demands, FixedRoles, Resources }) => {
             const sortedPlayers = [...this.players].sort((a, b) => b.score - a.score);
             sortedPlayers.forEach((p, i) => {
                 let demandPts = 0;
@@ -382,7 +424,15 @@ export class GameState {
                 });
                 const bonusPts = p.score - demandPts - rolePts;
                 const bonusStr = bonusPts > 0 ? `, 加工ボーナス: ${bonusPts}` : '';
-                logger.log(`${i + 1}位: ${p.name} - 最終得点: ${p.score}点 (需要基本点: ${demandPts}, 固定役基本点: ${rolePts}${bonusStr}) | 残り手札: ${p.hand.length}枚`);
+                const handCounts = p.hand.reduce((counts, resourceId) => {
+                    counts[resourceId] = (counts[resourceId] || 0) + 1;
+                    return counts;
+                }, {});
+                const handDetails = Object.keys(Resources)
+                    .filter(resourceId => handCounts[resourceId] > 0)
+                    .map(resourceId => `${Resources[resourceId].name}${handCounts[resourceId]}枚`)
+                    .join(', ') || 'なし';
+                logger.log(`${i + 1}位: ${p.name} - 最終得点: ${p.score}点 (需要基本点: ${demandPts}, 固定役基本点: ${rolePts}${bonusStr}) | 残り手札: ${p.hand.length}枚 [${handDetails}]`);
             });
             logger.log('======================');
         });

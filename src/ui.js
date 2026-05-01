@@ -101,7 +101,8 @@ export class UIManager {
             if (game.phase !== 'discard') return;
 
             const p = game.getCurrentPlayer();
-            const excess = p.hand.length - game.maxHandSize;
+            const maxHand = p.maxHandSize || game.maxHandSize;
+            const excess = p.hand.length - maxHand;
 
             if (this.selectedDiscardIndices.length !== excess) {
                 alert(`手札が上限を超えています。${excess}枚選んで破棄してください。`);
@@ -177,6 +178,12 @@ export class UIManager {
                 this.hideEffectOverlays();
                 this.renderMarketReplacePhase(game);
                 return;
+            } else if (game.phase === 'stockpile_exchange') {
+                if (setupOverlay) setupOverlay.classList.add('hidden');
+                if (discardOverlay) discardOverlay.classList.add('hidden');
+                this.hideEffectOverlays();
+                this.renderStockpileExchangePhase(game);
+                return;
             } else {
                 if (setupOverlay) setupOverlay.classList.add('hidden');
                 if (discardOverlay) discardOverlay.classList.add('hidden');
@@ -200,7 +207,10 @@ export class UIManager {
 
         const demandBtn = document.getElementById('btn-achieve-demand');
         if (demandBtn) {
-            demandBtn.disabled = game.turnState?.demandAchieved || false;
+            const demandCount = game.turnState?.demandAchieveCount ?? (game.turnState?.demandAchieved ? 1 : 0);
+            const additionalDemand = demandCount > 0;
+            demandBtn.disabled = additionalDemand && game.actionsLeft <= 0;
+            demandBtn.textContent = additionalDemand ? '追加需要達成 (1AP)' : '需要達成 (無料)';
             demandBtn.style.opacity = demandBtn.disabled ? '0.5' : '1';
         }
 
@@ -384,10 +394,11 @@ export class UIManager {
         }
 
         const p = game.getCurrentPlayer();
-        const excess = p.hand.length - game.maxHandSize;
+        const maxHand = p.maxHandSize || game.maxHandSize;
+        const excess = p.hand.length - maxHand;
 
         document.getElementById('discard-player-name').textContent = p.name;
-        document.getElementById('discard-max').textContent = game.maxHandSize;
+        document.getElementById('discard-max').textContent = maxHand;
         document.getElementById('discard-excess').textContent = excess;
 
         // 公開需要カードの表示
@@ -707,7 +718,7 @@ export class UIManager {
     }
 
     hideEffectOverlays() {
-        ['gain-resource-overlay', 'market-replace-overlay', 'free-plant-overlay'].forEach(id => {
+        ['gain-resource-overlay', 'market-replace-overlay', 'stockpile-exchange-overlay', 'free-plant-overlay'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.classList.add('hidden');
         });
@@ -760,6 +771,86 @@ export class UIManager {
             });
             container.appendChild(card);
         });
+    }
+
+    // 効果: 国家備蓄 — 手札を最大2枚交換し、同数の基本資源を得る
+    renderStockpileExchangePhase(game) {
+        const overlay = document.getElementById('stockpile-exchange-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('hidden');
+
+        const player = game.getCurrentPlayer();
+        this._stockpileDiscardSelected = [];
+        this._stockpileGainCounts = {};
+
+        const handContainer = document.getElementById('stockpile-hand-cards');
+        const gainContainer = document.getElementById('stockpile-gain-cards');
+        const countEl = document.getElementById('stockpile-count');
+        if (!handContainer || !gainContainer || !countEl) return;
+
+        const updateCount = () => {
+            const discardCount = this._stockpileDiscardSelected.length;
+            const gainCount = Object.values(this._stockpileGainCounts).reduce((sum, n) => sum + n, 0);
+            countEl.textContent = `破棄: ${discardCount}枚 / 獲得: ${gainCount}枚`;
+        };
+
+        handContainer.innerHTML = '';
+        player.hand.forEach((resId, idx) => {
+            const r = Resources[resId];
+            const card = this.createCardElement(r.name, r.type === 'base' ? '基本資源' : '交易品', r.icon, `resource ${r.type}`, (el) => {
+                const selectedIdx = this._stockpileDiscardSelected.indexOf(idx);
+                if (selectedIdx > -1) {
+                    this._stockpileDiscardSelected.splice(selectedIdx, 1);
+                    el.classList.remove('selected');
+                } else if (this._stockpileDiscardSelected.length < 2) {
+                    this._stockpileDiscardSelected.push(idx);
+                    el.classList.add('selected');
+                }
+                updateCount();
+            });
+            handContainer.appendChild(card);
+        });
+
+        gainContainer.innerHTML = '';
+        Object.values(Resources).filter(r => r.type === ResourceTypes.BASE).forEach(r => {
+            const card = this.createCardElement(r.name, '基本資源', r.icon, 'resource base', (el) => {
+                const discardCount = this._stockpileDiscardSelected.length;
+                const gainCount = Object.values(this._stockpileGainCounts).reduce((sum, n) => sum + n, 0);
+                const current = this._stockpileGainCounts[r.id] || 0;
+
+                if (current > 0 && gainCount >= discardCount) {
+                    this._stockpileGainCounts[r.id] = current - 1;
+                } else if (gainCount < discardCount) {
+                    this._stockpileGainCounts[r.id] = current + 1;
+                } else {
+                    return;
+                }
+
+                const next = this._stockpileGainCounts[r.id] || 0;
+                const overlay = el.querySelector('.card-overlay');
+                if (next > 0) {
+                    el.classList.add('selected');
+                    if (overlay) {
+                        overlay.textContent = `x${next}`;
+                        overlay.style.display = 'flex';
+                    }
+                } else {
+                    el.classList.remove('selected');
+                    if (overlay) {
+                        overlay.textContent = '';
+                        overlay.style.display = 'none';
+                    }
+                }
+                updateCount();
+            });
+            const badge = document.createElement('div');
+            badge.className = 'card-overlay';
+            badge.style.display = 'none';
+            card.appendChild(badge);
+            gainContainer.appendChild(card);
+        });
+
+        updateCount();
     }
 
     // 効果: 工房街整備 — 加工所建設オーバーレイを表示

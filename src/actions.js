@@ -158,8 +158,11 @@ export const executeExchange = (game, player, handIndices, marketIndex) => {
 };
 
 export const executeDemand = (game, player, demandId, handIndices) => {
-    if (game.turnState.demandAchieved) {
-        return { success: false, msg: '需要達成は1ターンに1回までです。' };
+    const achievedCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
+    const isAdditionalDemand = achievedCount > 0;
+
+    if (isAdditionalDemand && game.actionsLeft <= 0) {
+        return { success: false, msg: '追加の需要達成には1APが必要です。' };
     }
 
     const demand = Demands.find(d => d.id === demandId);
@@ -182,6 +185,11 @@ export const executeDemand = (game, player, demandId, handIndices) => {
     player.achievedDemands.push(demandId);
     const totalPoints = demand.points + check.bonusPoints;
     player.score += totalPoints;
+    if (isAdditionalDemand) {
+        game.actionsLeft--;
+        logger.log(`${player.name} が追加需要達成のため1APを消費しました。`);
+    }
+    game.turnState.demandAchieveCount = achievedCount + 1;
     game.turnState.demandAchieved = true;
 
     while (game.demandCards.length < 6 && game.demandDeck.length > 0) {
@@ -197,8 +205,7 @@ export const executeDemand = (game, player, demandId, handIndices) => {
             player.bonusApNextTurn = true;
             logger.log(`${player.name} が「兵站整備」効果を得ました。次のターンに+1APが追加されます。`);
         } else if (demand.effect === 'stockpile_exchange') {
-            player.maxHandSize = (player.maxHandSize || 8) + 1;
-            logger.log(`${player.name} が「国家備蓄」効果を得ました。手札上限が ${player.maxHandSize} 枚になりました。`);
+            game.phase = 'stockpile_exchange';
         } else if (demand.effect === 'gain_base_resource') {
             // UIフェーズ変更で処理（CPUは自動選択）
             game.phase = 'gain_resource';

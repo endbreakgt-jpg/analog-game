@@ -152,6 +152,23 @@ document.addEventListener('DOMContentLoaded', () => {
             ui._marketReplaceSelected = [];
         });
 
+        // 効果: 国家備蓄 — 手札交換決定ボタン
+        document.getElementById('btn-stockpile-confirm').addEventListener('click', () => {
+            const discardIndices = ui._stockpileDiscardSelected || [];
+            const gainCounts = ui._stockpileGainCounts || {};
+            const resourceIds = Object.entries(gainCounts)
+                .flatMap(([id, count]) => Array.from({ length: count }, () => id));
+
+            if (discardIndices.length > 2) return ui.showAlert('破棄できる手札は最大2枚までです。');
+            if (discardIndices.length !== resourceIds.length) {
+                return ui.showAlert('破棄した枚数と同じ枚数の基本資源を選択してください。0枚交換も可能です。');
+            }
+
+            game.completeStockpileExchange(game.getCurrentPlayer().id, discardIndices, resourceIds);
+            ui._stockpileDiscardSelected = [];
+            ui._stockpileGainCounts = {};
+        });
+
         // 効果: 工房街整備 — 建設ボタン
         document.getElementById('btn-free-plant-confirm').addEventListener('click', () => {
             const specId = ui._freePlantSpecialty;
@@ -175,4 +192,3 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
-

@@ -189,6 +189,8 @@ export class CPU {
             return this.cpuGainResource(game, player);
         } else if (game.phase === 'market_replace') {
             return this.cpuMarketReplace(game, player);
+        } else if (game.phase === 'stockpile_exchange') {
+            return this.cpuStockpileExchange(game, player);
         } else if (game.phase === 'playing') {
             return this.cpuTurn(game, player);
         }
@@ -264,33 +266,81 @@ export class CPU {
         return true;
     }
 
+    // 効果: 国家備蓄 — 不要度の低い手札を最大2枚、必要度の高い基本資源に交換する
+    static cpuStockpileExchange(game, player) {
+        const scores = this.getBaseResourceNeedScores(game, player);
+        const wantedResources = Object.values(Resources)
+            .filter(r => r.type === ResourceTypes.BASE)
+            .map(r => ({ id: r.id, score: scores[r.id] || 0 }))
+            .filter(x => x.score > 0)
+            .sort((a, b) => b.score - a.score);
+
+        if (wantedResources.length === 0 || player.hand.length === 0) {
+            game.completeStockpileExchange(player.id, [], []);
+            return true;
+        }
+
+        const discardCandidates = player.hand
+            .map((id, i) => ({ i, score: scores[id] || 0 }))
+            .sort((a, b) => a.score - b.score);
+
+        const exchangeCount = Math.min(2, wantedResources.length, discardCandidates.length);
+        const discardIndices = discardCandidates.slice(0, exchangeCount).map(x => x.i);
+        const gainResources = wantedResources.slice(0, exchangeCount).map(x => x.id);
+
+        game.completeStockpileExchange(player.id, discardIndices, gainResources);
+        return true;
+    }
+
+    static getBaseResourceNeedScores(game, player) {
+        const scores = {};
+        const demandObjs = game.demandCards.map(id => Demands.find(d => d.id === id)).filter(Boolean);
+        const roleObjs = FixedRoles.filter(r => !player.achievedRoles.includes(r.id));
+
+        [...demandObjs, ...roleObjs].forEach(obj => {
+            Object.entries(obj.req).forEach(([key, val]) => {
+                if (!key.startsWith('_') && Resources[key]?.type === ResourceTypes.BASE) {
+                    const has = player.hand.filter(id => id === key).length;
+                    scores[key] = (scores[key] || 0) + Math.max(0, val - has);
+                }
+            });
+        });
+
+        return scores;
+    }
+
+    static tryAchieveBestDemand(game, player) {
+        const processed = player.processingPlants || [];
+        const subsets = getAllSubsets(player.hand.map((_, i) => i));
+        let bestDemand = null, bestIndices = null, maxPts = -1;
+
+        for (const dId of game.demandCards) {
+            const demand = Demands.find(d => d.id === dId);
+            if (!demand) continue;
+            for (const subset of subsets) {
+                const cards = subset.map(i => player.hand[i]);
+                const check = Actions.ActionValidator.checkRequirements(cards, demand.req, processed, demand.bonus);
+                if (check.valid) {
+                    const pts = demand.points + check.bonusPoints;
+                    if (pts > maxPts) { maxPts = pts; bestDemand = demand; bestIndices = subset; }
+                }
+            }
+        }
+
+        if (!bestDemand) return false;
+        const res = Actions.executeDemand(game, player, bestDemand.id, bestIndices);
+        return res.success;
+    }
+
     static cpuTurn(game, player) {
         const processed = player.processingPlants || [];
 
         // -------------------------------------------------
-        // 優先度1: 需要カードの達成 (1ターンに1回まで)
+        // 優先度1: 需要カードの達成 (1回目は無料)
         // -------------------------------------------------
-        if (!game.turnState.demandAchieved) {
-            const subsets = getAllSubsets(player.hand.map((_, i) => i));
-            let bestDemand = null, bestIndices = null, maxPts = -1;
-
-            for (const dId of game.demandCards) {
-                const demand = Demands.find(d => d.id === dId);
-                if (!demand) continue;
-                for (const subset of subsets) {
-                    const cards = subset.map(i => player.hand[i]);
-                    const check = Actions.ActionValidator.checkRequirements(cards, demand.req, processed, demand.bonus);
-                    if (check.valid) {
-                        const pts = demand.points + check.bonusPoints;
-                        if (pts > maxPts) { maxPts = pts; bestDemand = demand; bestIndices = subset; }
-                    }
-                }
-            }
-
-            if (bestDemand) {
-                const res = Actions.executeDemand(game, player, bestDemand.id, bestIndices);
-                if (res.success) return true;
-            }
+        const demandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
+        if (demandCount === 0 && this.tryAchieveBestDemand(game, player)) {
+            return true;
         }
 
         // -------------------------------------------------
@@ -316,6 +366,14 @@ export class CPU {
                 const res = Actions.executeFixedRole(game, player, bestRole.id, bestIndices);
                 if (res.success) return true;
             }
+        }
+
+        // -------------------------------------------------
+        // 優先度2.5: 追加需要達成 (2回目以降は1AP)
+        // -------------------------------------------------
+        const currentDemandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
+        if (currentDemandCount > 0 && game.actionsLeft > 0 && this.tryAchieveBestDemand(game, player)) {
+            return true;
         }
 
         // -------------------------------------------------
