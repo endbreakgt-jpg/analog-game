@@ -1,0 +1,272 @@
+原因として一番ありそうなのは、CPUのマーケット交換候補生成がまだ
+
+> 基盤資源2枚以上 → 基盤資源
+> 基盤資源3枚以上 → 交易品
+
+のような基盤資源側だけを見ていて、現行ルールの
+
+> 交易品1枚 → 基盤資源1枚
+> 交易品2枚 → 交易品1枚
+
+を候補に入れていないことです。
+
+実装方針としては、CPU専用に雑に分岐を書くより、**「現在可能なマーケット交換を全部列挙する関数」**を作り、人間UIとCPUの両方で使えるようにするのが安全です。
+
+---
+
+## まず交換ルールを1か所に集約する
+
+たとえばこういう関数を作ります。
+
+```js
+function getValidMarketTrades(player, marketCards) {
+  const trades = [];
+  const hand = player.hand;
+
+  const baseCards = hand.filter(card => card.category === 'base');
+  const tradeGoods = hand.filter(card => card.category === 'trade');
+
+  const marketBase = marketCards.filter(card => card.category === 'base');
+  const marketTradeGoods = marketCards.filter(card => card.category === 'trade');
+
+  // 1. 基盤資源2枚 → マーケットの基盤資源1枚
+  if (baseCards.length >= 2) {
+    for (const target of marketBase) {
+      for (const payment of combinations(baseCards, 2)) {
+        trades.push({
+          type: 'marketTrade',
+          payment,
+          target,
+          scoreHint: 0,
+        });
+      }
+    }
+  }
+
+  // 2. 基盤資源3枚 → マーケットの交易品1枚
+  if (baseCards.length >= 3) {
+    for (const target of marketTradeGoods) {
+      for (const payment of combinations(baseCards, 3)) {
+        trades.push({
+          type: 'marketTrade',
+          payment,
+          target,
+          scoreHint: 0,
+        });
+      }
+    }
+  }
+
+  // 3. 交易品1枚 → マーケットの基盤資源1枚
+  if (tradeGoods.length >= 1) {
+    for (const target of marketBase) {
+      for (const payment of tradeGoods) {
+        trades.push({
+          type: 'marketTrade',
+          payment: [payment],
+          target,
+          scoreHint: 0,
+        });
+      }
+    }
+  }
+
+  // 4. 交易品2枚 → マーケットの交易品1枚
+  if (tradeGoods.length >= 2) {
+    for (const target of marketTradeGoods) {
+      for (const payment of combinations(tradeGoods, 2)) {
+        trades.push({
+          type: 'marketTrade',
+          payment,
+          target,
+          scoreHint: 0,
+        });
+      }
+    }
+  }
+
+  return trades;
+}
+```
+
+`combinations` は手札から指定枚数の組み合わせを作る補助関数です。
+
+```js
+function combinations(items, count) {
+  if (count === 0) return [[]];
+  if (items.length < count) return [];
+
+  const [first, ...rest] = items;
+
+  return [
+    ...combinations(rest, count - 1).map(combo => [first, ...combo]),
+    ...combinations(rest, count),
+  ];
+}
+```
+
+---
+
+## CPUは「可能な交換」から選ぶ
+
+CPU側では、まず全候補を出します。
+
+```js
+const trades = getValidMarketTrades(player, game.market);
+```
+
+そのうえで、目標に近い交換を選びます。
+
+最初は単純に、
+
+1. 交換後に需要達成できる
+2. 交換後に固定役達成できる
+3. 加工所建設に使える
+4. 交易品を取りに行く
+5. 適当な基盤資源を取る
+
+くらいでよいです。
+
+```js
+function chooseCpuMarketTrade(game, player) {
+  const trades = getValidMarketTrades(player, game.market);
+
+  if (trades.length === 0) return null;
+
+  const scored = trades.map(trade => ({
+    trade,
+    score: evaluateTrade(game, player, trade),
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored[0].trade;
+}
+```
+
+---
+
+## 評価関数は簡単でよい
+
+最初はこれくらいで十分です。
+
+```js
+function evaluateTrade(game, player, trade) {
+  let score = 0;
+
+  const simulatedHand = applyTradeToHand(player.hand, trade);
+
+  // 需要カードに近づく/達成できる
+  for (const demand of game.publicDemands) {
+    if (canSatisfyDemand(simulatedHand, player, demand)) {
+      score += demand.score ?? demand.baseScore ?? 5;
+    } else if (isCloserToDemand(player.hand, simulatedHand, player, demand)) {
+      score += 2;
+    }
+  }
+
+  // 固定役に近づく/達成できる
+  for (const role of getUnclaimedRoles(player)) {
+    if (canSatisfyRole(simulatedHand, player, role)) {
+      score += role.score ?? role.baseScore ?? 3;
+    } else if (isCloserToRole(player.hand, simulatedHand, player, role)) {
+      score += 1;
+    }
+  }
+
+  // 加工所建設に使える資源なら少し加点
+  if (canUseForProcessingFacility(player, trade.target)) {
+    score += 2;
+  }
+
+  // 交易品はやや価値高め
+  if (trade.target.category === 'trade') {
+    score += 1;
+  }
+
+  return score;
+}
+```
+
+ここで大事なのは、CPUが「交易品を払う交換」を候補として持っていることです。
+評価関数が雑でも、候補にさえ入っていれば最低限動きます。
+
+---
+
+## UIとCPUで別ロジックにしない方がよい
+
+おすすめは、マーケット交換の実行部分をこう分けることです。
+
+### 交換候補生成
+
+```js
+getValidMarketTrades(player, market)
+```
+
+### 交換可能か検証
+
+```js
+validateMarketTrade(player, paymentCards, targetCard)
+```
+
+### 実行
+
+```js
+executeMarketTrade(playerId, paymentCardIds, targetMarketCardId)
+```
+
+人間はUIから `executeMarketTrade` を呼ぶ。
+CPUも同じ `executeMarketTrade` を呼ぶ。
+
+こうすると、CPUだけ交易品交換できない、CPUだけ不正交換する、というズレを防げます。
+
+---
+
+## 現状コードへの最小修正なら
+
+もし今すぐ直すだけなら、CPUのマーケット交換判定にこの2条件を足せばよいです。
+
+```js
+// 交易品1枚 → マーケットの基盤資源1枚
+if (tradeGoodsInHand.length >= 1 && baseResourcesInMarket.length >= 1) {
+  return {
+    payment: [tradeGoodsInHand[0]],
+    target: baseResourcesInMarket[0],
+  };
+}
+
+// 交易品2枚 → マーケットの交易品1枚
+if (tradeGoodsInHand.length >= 2 && tradeGoodsInMarket.length >= 1) {
+  return {
+    payment: tradeGoodsInHand.slice(0, 2),
+    target: tradeGoodsInMarket[0],
+  };
+}
+```
+
+ただしこれは応急処置です。
+今後CPUを少し賢くするなら、やはり「全交換候補を列挙 → 評価 → 実行」の形にした方が拡張しやすいです。
+
+---
+
+## 実装上の注意
+
+交易品判定は、カード名ではなく `type` や `category` で行った方が安全です。
+
+```js
+card.category === 'trade'
+card.category === 'base'
+```
+
+名前ベースで、
+
+```js
+['砂糖', '香辛料', '絹', '宝石', '象牙'].includes(card.name)
+```
+
+のようにすると、表示名変更やID差異で壊れやすいです。
+
+---
+
+結論としては、CPU専用の交換処理を直すより、**マーケット交換の候補生成を共通化**するのが一番よいです。
+そのうえでCPUは、候補の中から「需要・固定役に近づくもの」を選ぶ形にすると、かなり壁打ち役として自然になります。

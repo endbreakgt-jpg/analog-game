@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>産業発展アナログゲーム 試作1号</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+JP:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- セットアップ画面 -->
+    <div id="setup-overlay"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-dark); z-index:2000; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:40px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:500px;">
+            <h2 style="font-size:2rem; margin-bottom:10px; color:var(--border-dark);">産業発展 試作1号</h2>
+            <p>プレイ人数を選択してゲームを開始します。</p>
+            <div class="setup-options" style="margin: 20px 0; text-align: left; display: inline-block;">
+                <div style="margin-bottom: 10px;">
+                    <label style="display:inline-block; width:80px;">人間:</label>
+                    <input type="number" id="input-human-count" value="1" min="0" max="5"
+                        style="width: 60px; font-size: 1.2rem; text-align: center;"> 人
+                </div>
+                <div>
+                    <label style="display:inline-block; width:80px;">CPU:</label>
+                    <input type="number" id="input-cpu-count" value="1" min="0" max="5"
+                        style="width: 60px; font-size: 1.2rem; text-align: center;"> 人
+                </div>
+                <div id="setup-error-msg"
+                    style="color: var(--accent-red); font-size: 0.9rem; margin-top: 10px; min-height: 1.2em;"></div>
+            </div>
+            <button id="btn-start-game" class="btn primary-btn"
+                style="font-size:1.2rem; padding:10px 30px;">ゲーム開始</button>
+        </div>
+    </div>
+
+    <!-- 初期配置（特産品選択）画面 -->
+    <div id="setup-phase-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1500; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:900px; width:95%;">
+            <h2 style="font-size:1.5rem; margin-bottom:10px;"><span id="setup-player-name"></span> の<span
+                    id="setup-action-name">初期配置</span></h2>
+            <p id="setup-desc">初期特産品5枚のうち、最初から稼働させる3枚を選択してください。</p>
+
+            <div style="margin:15px 0;">
+                <p style="font-size:0.9rem; color:var(--accent-red); margin-bottom:5px;">現在の公開需要カード</p>
+                <div id="setup-demand-cards" class="card-row"
+                    style="justify-content:center; transform:scale(0.85); transform-origin:center top;"></div>
+            </div>
+
+            <div id="setup-specialties" class="card-row" style="justify-content:center; margin:20px 0;">
+                <!-- JSで描画 -->
+            </div>
+            <button id="btn-setup-confirm" class="btn primary-btn"
+                style="font-size:1.2rem; padding:10px 30px;">決定</button>
+        </div>
+    </div>
+
+    <!-- 手札破棄画面 -->
+    <div id="discard-phase-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1500; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:800px; width: 95%;">
+            <h2 style="font-size:1.5rem; margin-bottom:10px;"><span id="discard-player-name"></span> の手札調整</h2>
+            <p id="discard-desc" style="color:var(--accent-red); font-weight:bold; margin-bottom:15px;">
+                手札が上限(<span id="discard-max"></span>枚)を超えています。<span id="discard-excess"></span>枚選択して破棄してください。
+            </p>
+
+            <div style="margin:15px 0;">
+                <p style="font-size:0.9rem; color:var(--accent-red); margin-bottom:5px;">現在の公開需要カード</p>
+                <div id="discard-demand-cards" class="card-row"
+                    style="justify-content:center; transform:scale(0.85); transform-origin:center top;"></div>
+            </div>
+
+            <div style="margin:20px 0;">
+                <p style="font-size:1rem; font-weight:bold; margin-bottom:10px;">手札 (クリックして破棄対象を選択)</p>
+                <div id="discard-hand-cards" class="card-row" style="justify-content:center; flex-wrap:wrap;">
+                    <!-- JSで描画 -->
+                </div>
+            </div>
+
+            <button id="btn-discard-confirm" class="btn warning-btn"
+                style="font-size:1.2rem; padding:10px 30px;">破棄する</button>
+        </div>
+    </div>
+
+    <!-- 結果画面 -->
+    <div id="result-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:3000; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:40px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:600px; width:90%;">
+            <h2 style="font-size:2rem; margin-bottom:20px; color:var(--border-dark);">ゲーム終了！最終結果</h2>
+            <div id="result-content" style="margin-bottom: 30px; text-align: left;">
+                <!-- JSで描画 -->
+            </div>
+            <div style="display:flex; justify-content:center; gap:15px;">
+                <button id="btn-return-screen" class="btn secondary-btn"
+                    style="font-size:1.2rem; padding:10px 30px;">画面に戻る</button>
+                <button id="btn-restart-game" class="btn primary-btn"
+                    style="font-size:1.2rem; padding:10px 30px;">もう一度遊ぶ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 効果: 食料市 — 基本資源取得 -->
+    <div id="gain-resource-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:600px; width:95%;">
+            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 食料市の効果</h2>
+            <p style="margin-bottom:18px;">任意の基本資源を1枚選んで手札に加えてください。</p>
+            <div id="gain-resource-cards" class="card-row"
+                style="justify-content:center; flex-wrap:wrap; margin-bottom:18px;"></div>
+            <button id="btn-gain-resource-confirm" class="btn primary-btn"
+                style="font-size:1.1rem; padding:8px 28px;">決定</button>
+        </div>
+    </div>
+
+    <!-- 効果: 造船材調達 — マーケット入れ替え -->
+    <div id="market-replace-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
+            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 造船材調達の効果</h2>
+            <p style="margin-bottom:8px;">マーケットのカードを<strong>最大2枚まで</strong>選んで入れ替えます（0枚でもOK）。</p>
+            <div id="market-replace-cards" class="card-row"
+                style="justify-content:center; flex-wrap:wrap; margin:15px 0;"></div>
+            <p id="market-replace-count" style="font-size:0.9rem; color:var(--accent-red); margin-bottom:12px;">選択中: 0 枚
+            </p>
+            <button id="btn-market-replace-confirm" class="btn primary-btn"
+                style="font-size:1.1rem; padding:8px 28px;">決定</button>
+        </div>
+    </div>
+
+    <!-- 効果: 工房街整備 — AP不要加工所建設 -->
+    <div id="free-plant-overlay" class="hidden"
+        style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
+            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 工房街整備の効果</h2>
+            <p style="margin-bottom:6px;">加工所を建設する特産品と、支払う資源を選んでください。<strong>（AP不要・資源コストは通常通り）</strong></p>
+            <div style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap; margin:15px 0;">
+                <div>
+                    <p style="font-size:0.9rem; margin-bottom:6px;">稼働中の基本特産品</p>
+                    <div id="free-plant-specialties" class="card-row" style="justify-content:center;"></div>
+                </div>
+                <div>
+                    <p style="font-size:0.9rem; margin-bottom:6px;">支払う資源 (手札から)</p>
+                    <div id="free-plant-hand" class="card-row" style="justify-content:center;"></div>
+                </div>
+            </div>
+            <div style="display:flex; gap:12px; justify-content:center; margin-top:10px;">
+                <button id="btn-free-plant-confirm" class="btn primary-btn"
+                    style="font-size:1.1rem; padding:8px 28px;">建設する</button>
+                <button id="btn-free-plant-cancel" class="btn secondary-btn"
+                    style="font-size:1.1rem; padding:8px 28px;">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-container" style="display:none;">
+        <!-- ヘッダー：ラウンド情報、手番情報 -->
+        <header id="game-header">
+            <div class="header-left">
+                <h1 class="game-title">産業発展 試作1号</h1>
+            </div>
+            <div class="header-center">
+                <div class="status-panel">
+                    <div id="round-info" class="status-badge">Round <span id="val-round">1</span> / 6</div>
+                    <div id="turn-info" class="status-badge active"><span id="val-player">Player 1</span> の手番</div>
+                    <div id="action-info" class="status-badge highlight">残り <span id="val-actions">2</span> アクション</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="btn-end-turn" class="btn primary-btn">ターン終了</button>
+            </div>
+        </header>
+
+        <main id="board-area">
+            <div id="log-panel" class="log-panel">
+                <div id="log-content"></div>
+            </div>
+
+            <!-- 中央エリア：マーケット、需要カード -->
+            <section id="center-board">
+                <div class="board-panel market-panel">
+                    <div class="panel-header">
+                        <h2>中央マーケット</h2>
+                        <span class="deck-counter">補充デッキ: <span id="val-market-deck">19</span>枚</span>
+                    </div>
+                    <div id="market-cards" class="card-row">
+                        <!-- マーケットのカードがここに入る -->
+                    </div>
+                    <div class="action-buttons">
+                        <button id="btn-market-exchange" class="btn action-btn">マーケット交換 (1AP)</button>
+                        <button id="btn-show-rate" class="btn secondary-btn" style="margin-left:5px;">交換レート</button>
+                    </div>
+                </div>
+
+                <div class="board-panel demand-panel">
+                    <div class="panel-header">
+                        <h2>公開需要カード</h2>
+                        <span class="deck-counter">残り: <span id="val-demand-deck">12</span>枚</span>
+                    </div>
+                    <div id="demand-cards" class="card-row">
+                        <!-- 需要カードがここに入る -->
+                    </div>
+                    <div class="action-buttons">
+                        <button id="btn-achieve-demand" class="btn action-btn">需要達成 (ターン1回/無料)</button>
+                    </div>
+                </div>
+
+                <div class="board-panel fixed-role-panel">
+                    <div class="panel-header">
+                        <h2>固定役表</h2>
+                    </div>
+                    <div id="persistent-role-table"
+                        style="flex-grow:1; overflow-y:auto; font-size:0.75rem; margin-bottom:10px;">
+                        <!-- JSで描画 -->
+                    </div>
+                    <div class="action-buttons" style="margin-top:15px; display:flex; flex-direction:column; gap:5px;">
+                        <button id="btn-achieve-fixed-role" class="btn action-btn" style="width:100%;">固定役達成
+                            (ターン1回/無料)</button>
+                        <button id="btn-build-processing-plant" class="btn action-btn"
+                            style="width:100%; background-color:#8b5a2b;">加工所建設 (1AP)</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 各プレイヤーのエリア -->
+            <section id="players-area">
+                <!-- プレイヤーエリアがJSで動的に生成される -->
+            </section>
+        </main>
+
+        <!-- モーダル・ダイアログ用 -->
+        <div id="modal-overlay" class="hidden">
+            <div id="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">タイトル</h2>
+                    <button id="btn-modal-close-icon" class="icon-btn">&times;</button>
+                </div>
+                <div id="modal-body"></div>
+                <div class="modal-actions">
+                    <button id="btn-modal-close" class="btn secondary-btn">閉じる</button>
+                    <button id="btn-modal-confirm" class="btn primary-btn hidden">決定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- テンプレート -->
+    <template id="tpl-player-board">
+        <div class="player-board" data-player-id="">
+            <div class="player-header">
+                <h3 class="player-name">Player</h3>
+                <div class="player-stats">
+                    <span title="勝利点">🏆 <span class="score-val">0</span>点</span>
+                    <span title="手札枚数">手札: <span class="hand-count-val">0</span>/8枚</span>
+                </div>
+            </div>
+            <div class="player-content">
+                <div class="player-section specialties-section">
+                    <h4>特産品 (稼働中)</h4>
+                    <div class="card-row active-specialties"></div>
+                    <h4 class="mt-2">特産品 (未開発)</h4>
+                    <div class="card-row inactive-specialties"></div>
+                </div>
+                <div class="player-section hand-section">
+                    <h4>手札 (資源)</h4>
+                    <div class="card-row hand-cards"></div>
+                </div>
+                <div class="player-section achievements-section">
+                    <h4>獲得済み</h4>
+                    <div class="achieved-demands"></div>
+                    <div class="achieved-roles"></div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+
+</html>
