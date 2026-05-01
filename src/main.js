@@ -31,6 +31,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // 船団整備効果のAP不要通常交換モード
+        if (ui._freeMarketExchangeMode && game.turnState?.freeMarketExchange) {
+            const res = Actions.executeExchange(game, game.getCurrentPlayer(), handIndices, marketIndex, {
+                free: true,
+                source: '船団整備効果'
+            });
+            if (res.success) {
+                ui._freeMarketExchangeMode = false;
+                ui.clearSelection();
+                game.notifyChange();
+            } else {
+                ui.showAlert(res.msg);
+            }
+            return;
+        }
+
         if (game.actionsLeft <= 0) return ui.showAlert('アクションポイントが足りません。');
 
         const res = Actions.executeExchange(game, game.getCurrentPlayer(), handIndices, marketIndex);
@@ -152,21 +168,24 @@ document.addEventListener('DOMContentLoaded', () => {
             ui._marketReplaceSelected = [];
         });
 
-        // 効果: 国家備蓄 — 手札交換決定ボタン
+        // 効果: 国家備蓄/住宅整備 — 手札交換決定ボタン
         document.getElementById('btn-stockpile-confirm').addEventListener('click', () => {
             const discardIndices = ui._stockpileDiscardSelected || [];
             const gainCounts = ui._stockpileGainCounts || {};
             const resourceIds = Object.entries(gainCounts)
                 .flatMap(([id, count]) => Array.from({ length: count }, () => id));
+            const maxCount = ui._handExchangeMaxCount || 2;
+            const sourceName = game.phase === 'hand_exchange_1' ? '住宅整備' : '国家備蓄';
 
-            if (discardIndices.length > 2) return ui.showAlert('破棄できる手札は最大2枚までです。');
+            if (discardIndices.length > maxCount) return ui.showAlert(`破棄できる手札は最大${maxCount}枚までです。`);
             if (discardIndices.length !== resourceIds.length) {
                 return ui.showAlert('破棄した枚数と同じ枚数の基本資源を選択してください。0枚交換も可能です。');
             }
 
-            game.completeStockpileExchange(game.getCurrentPlayer().id, discardIndices, resourceIds);
+            game.completeHandExchange(game.getCurrentPlayer().id, discardIndices, resourceIds, maxCount, sourceName);
             ui._stockpileDiscardSelected = [];
             ui._stockpileGainCounts = {};
+            ui._handExchangeMaxCount = null;
         });
 
         // 効果: 工房街整備 — 建設ボタン

@@ -1,12 +1,14 @@
-import { Resources, ResourceTypes, Specialties, Demands, FixedRoles } from './data.js';
+import { Resources, ResourceTypes, Specialties, Demands, FixedRoles, getDemandVariants } from './data.js';
 
 const EffectDescriptions = {
     'gain_base_resource': '効果：好きな基本資源1枚を得る',
     'bonus_ap_next_turn': '効果：次の自分のターンに+1AP',
     'free_processing_plant': '効果：APを使わず加工所を1回建設できる',
     'stockpile_exchange': '効果：手札を2枚まで捨て、同じ枚数だけ好きな基本資源を得る',
+    'hand_exchange_1': '効果：手札を1枚まで捨て、同じ枚数だけ好きな基本資源を得る',
     'market_replace_2': '効果：マーケットのカードを最大2枚まで入れ替える',
-    'discounted_exchange': '効果：1回だけマーケットでの交換コストを1軽減する（最低コスト1枚）'
+    'discounted_exchange': '効果：1回だけマーケットでの交換コストを1軽減する（最低コスト1枚）',
+    'normal_market_exchange': '効果：APを使わず通常のマーケット交換を1回行える'
 };
 
 export class UIManager {
@@ -182,7 +184,13 @@ export class UIManager {
                 if (setupOverlay) setupOverlay.classList.add('hidden');
                 if (discardOverlay) discardOverlay.classList.add('hidden');
                 this.hideEffectOverlays();
-                this.renderStockpileExchangePhase(game);
+                this.renderHandExchangePhase(game, 2, '国家備蓄', '手札を最大2枚まで破棄し、同じ枚数だけ好きな基本資源を得ます（0枚でもOK）。');
+                return;
+            } else if (game.phase === 'hand_exchange_1') {
+                if (setupOverlay) setupOverlay.classList.add('hidden');
+                if (discardOverlay) discardOverlay.classList.add('hidden');
+                this.hideEffectOverlays();
+                this.renderHandExchangePhase(game, 1, '住宅整備', '手札を最大1枚まで破棄し、同じ枚数だけ好きな基本資源を得ます（0枚でもOK）。');
                 return;
             } else {
                 if (setupOverlay) setupOverlay.classList.add('hidden');
@@ -275,36 +283,7 @@ export class UIManager {
             ? '初期特産品5枚のうち、最初から稼働させる3枚を選択してください。'
             : '未開発の特産品から、稼働させるものを1枚選択してください。';
 
-        // 公開需要カードの表示
-        const demandContainer = document.getElementById('setup-demand-cards');
-        if (demandContainer) {
-            demandContainer.innerHTML = '';
-            game.demandCards.forEach(dId => {
-                const d = Demands.find(x => x.id === dId);
-                if (d) {
-                    const reqHtml = Object.entries(d.req).map(([k, v]) => {
-                        if (k === '_diffBase') return `異なる基本資源${v}種`;
-                        if (k === '_diffTrade') return `異なる交易品${v}種`;
-                        if (k === '_anyBase') return `任意の基本資源${v}個`;
-                        if (k === '_anyTrade') return `任意の交易品${v}個`;
-                        if (k === '_anyProcessed') return `任意の加工品${v}個`;
-                        if (k === '_diffProcessed') return `異なる加工品${v}種`;
-                        return `${Resources[k] ? Resources[k].name : k}${v}`;
-                    }).join('<br>');
-
-                    let customClass = 'demand';
-                    let titleText = d.name;
-                    let tooltip = null;
-                    if (d.effect) {
-                        customClass += ' has-effect';
-                        titleText += ' ⚙️';
-                        tooltip = EffectDescriptions[d.effect];
-                    }
-                    const card = this.createCardElement(titleText, `条件:\n${reqHtml}`, `+${d.points}🏆`, customClass, null, null, tooltip);
-                    demandContainer.appendChild(card);
-                }
-            });
-        }
+        this.renderPopupFieldPreview('setup-field-preview', game);
 
         const container = document.getElementById('setup-specialties');
         container.innerHTML = '';
@@ -388,6 +367,256 @@ export class UIManager {
         return div;
     }
 
+    escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[ch]));
+    }
+
+    getRequirementTokenHtml(key, count = 1) {
+        if (!key.startsWith('_')) {
+            const resource = Resources[key];
+            if (!resource) return `<span class="req-token unknown">${this.escapeHtml(key)}</span>`;
+
+            return Array.from({ length: count }, () =>
+                `<span class="req-token resource ${resource.type}" title="${this.escapeHtml(resource.name)}">${resource.icon}</span>`
+            ).join('<span class="req-plus">+</span>');
+        }
+
+        const specialDefs = {
+            _anyBase: { label: '基本', className: 'base', title: '任意の基本資源' },
+            _anyTrade: { label: '交易', className: 'trade', title: '任意の交易品' },
+            _anyProcessed: { label: '加工', className: 'processed', title: '任意の加工品' },
+            _diffBase: { label: `基本x${count}種`, className: 'base', title: `異なる基本資源${count}種` },
+            _diffTrade: { label: `交易x${count}種`, className: 'trade', title: `異なる交易品${count}種` },
+            _diffProcessed: { label: `加工x${count}種`, className: 'processed', title: `異なる加工品${count}種` }
+        };
+        const def = specialDefs[key] || { label: key, className: 'unknown', title: key };
+        const countText = key.startsWith('_any') && count > 1 ? `x${count}` : '';
+
+        return `<span class="req-token special ${def.className}" title="${this.escapeHtml(def.title)}">${this.escapeHtml(def.label)}${countText}</span>`;
+    }
+
+    getRequirementTokensHtml(req) {
+        const tokens = Object.entries(req).map(([key, count]) => this.getRequirementTokenHtml(key, count));
+        return tokens.map((token, index) => index === 0 ? token : `<span class="req-plus">+</span>${token}`).join('');
+    }
+
+    getDemandVariantRowsHtml(demand, options = {}) {
+        const variants = getDemandVariants(demand);
+        const showVariantPoints = options.showVariantPoints ?? false;
+        const singleLabel = options.singleLabel || '条件';
+
+        return variants.map(variant => {
+            const label = variants.length > 1 ? variant.label : singleLabel;
+            const points = showVariantPoints ? `<span class="variant-points">${variant.points}点</span>` : '';
+            return `
+                <div class="demand-variant-row">
+                    <span class="demand-variant-label">${this.escapeHtml(label)}</span>
+                    <span class="req-line">${this.getRequirementTokensHtml(variant.req)}${points}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    createDemandCardElement(demand, onClick = null) {
+        const div = document.createElement('div');
+        const hasEffect = Boolean(demand.effect);
+        div.className = `card demand${hasEffect ? ' has-effect' : ''}`;
+        if (hasEffect) {
+            div.setAttribute('title', EffectDescriptions[demand.effect] || '');
+        }
+
+        div.innerHTML = `
+            <div class="demand-card-name">${this.escapeHtml(demand.name)}${hasEffect ? '<span class="demand-card-effect">⚙</span>' : ''}</div>
+            <div class="demand-card-score">${this.getDemandPointText(demand)}</div>
+            <div class="demand-card-requirements">${this.getDemandVariantRowsHtml(demand)}</div>
+        `;
+
+        if (onClick) {
+            div.addEventListener('click', () => onClick(div));
+        }
+        return div;
+    }
+
+    getRequirementText(req) {
+        return Object.entries(req).map(([k, v]) => {
+            if (k === '_diffBase') return `異なる基本資源${v}種`;
+            if (k === '_diffTrade') return `異なる交易品${v}種`;
+            if (k === '_anyBase') return `任意の基本資源${v}個`;
+            if (k === '_anyTrade') return `任意の交易品${v}個`;
+            if (k === '_anyProcessed') return `任意の加工品${v}個`;
+            if (k === '_diffProcessed') return `異なる加工品${v}種`;
+            const name = Resources[k] ? Resources[k].name : k;
+            return v > 1 ? `${name}${v}` : name;
+        }).join('+');
+    }
+
+    getDemandRequirementHtml(demand) {
+        return getDemandVariants(demand)
+            .map(variant => `${variant.label}: ${this.getRequirementText(variant.req)} / ${variant.points}点`)
+            .join('<br>');
+    }
+
+    getDemandPointText(demand) {
+        const points = [...new Set(getDemandVariants(demand).map(variant => variant.points))];
+        return `+${points.join('/')}🏆`;
+    }
+
+    isProcessedHandResource(resourceId, player) {
+        return Resources[resourceId]?.type === ResourceTypes.BASE
+            && (player.processingPlants || []).includes(resourceId);
+    }
+
+    getHandResourceCardClass(resourceId, player) {
+        const resource = Resources[resourceId];
+        const processedClass = this.isProcessedHandResource(resourceId, player) ? ' processed' : '';
+        return `resource ${resource.type}${processedClass}`;
+    }
+
+    getHandResourceTypeText(resourceId, player) {
+        if (this.isProcessedHandResource(resourceId, player)) return '加工品扱い';
+        return Resources[resourceId].type === ResourceTypes.BASE ? '基本資源' : '交易品';
+    }
+
+    getPopupFocusPlayerId(game) {
+        if (game.phase === 'setup') return game.players[game.setupPlayerIndex]?.id;
+        if (game.phase === 'free_development') return game.players[game.devPlayerIndex]?.id;
+        return game.getCurrentPlayer()?.id;
+    }
+
+    getResourceChipsHtml(resourceIds, processedResources = []) {
+        if (!resourceIds || resourceIds.length === 0) {
+            return '<span class="field-chip empty">なし</span>';
+        }
+
+        const counts = resourceIds.reduce((acc, id) => {
+            acc[id] = (acc[id] || 0) + 1;
+            return acc;
+        }, {});
+
+        return Object.keys(Resources)
+            .filter(id => counts[id] > 0)
+            .map(id => {
+                const resource = Resources[id];
+                const countText = counts[id] > 1 ? `x${counts[id]}` : '';
+                const isProcessed = resource.type === ResourceTypes.BASE && processedResources.includes(id);
+                const className = isProcessed ? 'processed' : resource.type;
+                const title = isProcessed ? ' title="加工品扱い"' : '';
+                return `<span class="field-chip ${className}"${title}>${resource.icon} ${resource.name}${countText}</span>`;
+            })
+            .join('') || '<span class="field-chip empty">なし</span>';
+    }
+
+    getSpecialtyChipsHtml(specialtyIds) {
+        if (!specialtyIds || specialtyIds.length === 0) {
+            return '<span class="field-chip empty">なし</span>';
+        }
+
+        return specialtyIds.map(id => {
+            const specialty = Specialties[id];
+            if (!specialty) return '';
+            const resource = Resources[specialty.resource];
+            return `<span class="field-chip ${resource.type}">${specialty.icon} ${specialty.name}</span>`;
+        }).join('') || '<span class="field-chip empty">なし</span>';
+    }
+
+    getAchievementsPreviewText(player) {
+        const demandNames = player.achievedDemands.map(record => {
+            const demandId = typeof record === 'string' ? record : record.demandId;
+            const demand = Demands.find(d => d.id === demandId);
+            if (!demand) return null;
+            if (typeof record !== 'string' && record.variantId !== 'normal') {
+                return `${demand.name}/${record.variantLabel}`;
+            }
+            return demand.name;
+        }).filter(Boolean);
+        const roleNames = player.achievedRoles.map(id => FixedRoles.find(r => r.id === id)?.name).filter(Boolean);
+        const all = [...demandNames, ...roleNames];
+        return all.length > 0 ? all.join('、') : 'なし';
+    }
+
+    renderPopupFieldPreview(containerId, game) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const focusPlayerId = this.getPopupFocusPlayerId(game);
+        const marketHtml = game.marketCards.map(id => {
+            if (!id) return '<span class="field-chip empty">空き枠</span>';
+            const resource = Resources[id];
+            return `<span class="field-chip ${resource.type}">${resource.icon} ${resource.name}</span>`;
+        }).join('');
+
+        const demandHtml = game.demandCards.map(id => {
+            const demand = Demands.find(d => d.id === id);
+            if (!demand) return '';
+            const effectText = demand.effect ? ' ⚙️' : '';
+            const effectClass = demand.effect ? ' has-effect' : '';
+            const tooltip = demand.effect ? ` title="${this.escapeHtml(EffectDescriptions[demand.effect] || '')}"` : '';
+            return `
+                <div class="field-demand-item${effectClass}"${tooltip}>
+                    <div class="field-demand-name">
+                        <span>${this.escapeHtml(demand.name)}${effectText}</span>
+                        <span>${this.getDemandPointText(demand)}</span>
+                    </div>
+                    <div class="field-demand-conditions">${this.getDemandVariantRowsHtml(demand)}</div>
+                </div>
+            `;
+        }).join('');
+
+        const playerHtml = game.players.map(player => {
+            const currentClass = player.id === focusPlayerId ? ' current' : '';
+            return `
+                <div class="field-player-item${currentClass}">
+                    <div class="field-player-name">${player.name} / ${player.score}点 / 手札${player.hand.length}枚</div>
+                    <div class="field-player-line">
+                        <span class="field-player-label">稼働</span>
+                        <span class="field-chip-row">${this.getSpecialtyChipsHtml(player.activeSpecialties)}</span>
+                    </div>
+                    <div class="field-player-line">
+                        <span class="field-player-label">未開発</span>
+                        <span class="field-chip-row">${this.getSpecialtyChipsHtml(player.inactiveSpecialties)}</span>
+                    </div>
+                    <div class="field-player-line">
+                        <span class="field-player-label">手札</span>
+                        <span class="field-chip-row">${this.getResourceChipsHtml(player.hand, player.processingPlants || [])}</span>
+                    </div>
+                    <div class="field-player-line">
+                        <span class="field-player-label">獲得</span>
+                        <span>${this.getAchievementsPreviewText(player)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="popup-field-card">
+                <div class="popup-field-title">
+                    <span>場の状況</span>
+                    <span>Round ${game.round} / ${game.maxRounds}</span>
+                </div>
+                <div class="popup-field-grid">
+                    <section class="popup-field-section">
+                        <h4>中央マーケット</h4>
+                        <div class="field-chip-row">${marketHtml || '<span class="field-chip empty">なし</span>'}</div>
+                    </section>
+                    <section class="popup-field-section">
+                        <h4>公開需要カード</h4>
+                        <div class="field-demand-list">${demandHtml || '<div class="field-demand-item">なし</div>'}</div>
+                    </section>
+                    <section class="popup-field-section full">
+                        <h4>プレイヤー状況</h4>
+                        <div class="field-player-list">${playerHtml}</div>
+                    </section>
+                </div>
+            </div>
+        `;
+    }
+
     renderDiscardPhase(game) {
         if (!Array.isArray(this.selectedDiscardIndices)) {
             this.selectedDiscardIndices = [];
@@ -401,36 +630,7 @@ export class UIManager {
         document.getElementById('discard-max').textContent = maxHand;
         document.getElementById('discard-excess').textContent = excess;
 
-        // 公開需要カードの表示
-        const demandContainer = document.getElementById('discard-demand-cards');
-        if (demandContainer) {
-            demandContainer.innerHTML = '';
-            game.demandCards.forEach(dId => {
-                const d = Demands.find(x => x.id === dId);
-                if (d) {
-                    const reqHtml = Object.entries(d.req).map(([k, v]) => {
-                        if (k === '_diffBase') return `異なる基本資源${v}種`;
-                        if (k === '_diffTrade') return `異なる交易品${v}種`;
-                        if (k === '_anyBase') return `任意の基本資源${v}個`;
-                        if (k === '_anyTrade') return `任意の交易品${v}個`;
-                        if (k === '_anyProcessed') return `任意の加工品${v}個`;
-                        if (k === '_diffProcessed') return `異なる加工品${v}種`;
-                        return `${Resources[k] ? Resources[k].name : k}${v}`;
-                    }).join('<br>');
-
-                    let customClass = 'demand';
-                    let titleText = d.name;
-                    let tooltip = null;
-                    if (d.effect) {
-                        customClass += ' has-effect';
-                        titleText += ' ⚙️';
-                        tooltip = EffectDescriptions[d.effect];
-                    }
-                    const card = this.createCardElement(titleText, `条件:\n${reqHtml}`, `+${d.points}🏆`, customClass, null, null, tooltip);
-                    demandContainer.appendChild(card);
-                }
-            });
-        }
+        this.renderPopupFieldPreview('discard-field-preview', game);
 
         // プレイヤーの手札表示
         const handContainer = document.getElementById('discard-hand-cards');
@@ -438,7 +638,7 @@ export class UIManager {
             handContainer.innerHTML = '';
             p.hand.forEach((resId, idx) => {
                 const r = Resources[resId];
-                const card = this.createCardElement(r.name, r.type === 'base' ? '基本資源' : '交易品', r.icon, `resource ${r.type}`, (el) => {
+                const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, p), r.icon, this.getHandResourceCardClass(resId, p), (el) => {
                     const arrIdx = this.selectedDiscardIndices.indexOf(idx);
                     if (arrIdx > -1) {
                         this.selectedDiscardIndices.splice(arrIdx, 1);
@@ -495,25 +695,7 @@ export class UIManager {
         game.demandCards.forEach(dId => {
             const d = Demands.find(x => x.id === dId);
             if (!d) return;
-            const reqHtml = Object.entries(d.req).map(([k, v]) => {
-                if (k === '_diffBase') return `異なる基本資源${v}種`;
-                if (k === '_diffTrade') return `異なる交易品${v}種`;
-                if (k === '_anyBase') return `任意の基本資源${v}個`;
-                if (k === '_anyTrade') return `任意の交易品${v}個`;
-                if (k === '_anyProcessed') return `任意の加工品${v}個`;
-                if (k === '_diffProcessed') return `異なる加工品${v}種`;
-                return `${Resources[k] ? Resources[k].name : k}${v}`;
-            }).join('<br>');
-
-            let customClass = 'demand';
-            let titleText = d.name;
-            let tooltip = null;
-            if (d.effect) {
-                customClass += ' has-effect';
-                titleText += ' ⚙️';
-                tooltip = EffectDescriptions[d.effect];
-            }
-            const card = this.createCardElement(titleText, `条件:\n${reqHtml}`, `+${d.points}🏆`, customClass, (el) => {
+            const card = this.createDemandCardElement(d, (el) => {
                 if (this.selectedDemandId === d.id) {
                     this.selectedDemandId = null;
                     el.classList.remove('selected');
@@ -522,7 +704,7 @@ export class UIManager {
                     this.selectedDemandId = d.id;
                     el.classList.add('selected');
                 }
-            }, null, tooltip);
+            });
             if (this.selectedDemandId === d.id) card.classList.add('selected');
             container.appendChild(card);
         });
@@ -605,7 +787,7 @@ export class UIManager {
             player.hand.forEach((resId, idx) => {
                 const r = Resources[resId];
                 const isCurrentPlayer = player.id === game.currentPlayerIndex;
-                const card = this.createCardElement(r.name, r.type === 'base' ? '基本資源' : '交易品', r.icon, `resource ${r.type}`, isCurrentPlayer ? (el) => {
+                const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), isCurrentPlayer ? (el) => {
                     const selectedIdx = this.selectedHandIndices.indexOf(idx);
                     if (selectedIdx > -1) {
                         this.selectedHandIndices.splice(selectedIdx, 1);
@@ -629,12 +811,19 @@ export class UIManager {
             const demandsCont = board.querySelector('.achieved-demands');
             demandsCont.innerHTML = '';
             const isCurrentPlayer = player.id === game.currentPlayerIndex;
-            player.achievedDemands.forEach(id => {
-                const d = Demands.find(x => x.id === id);
+            player.achievedDemands.forEach(record => {
+                const demandId = typeof record === 'string' ? record : record.demandId;
+                const d = Demands.find(x => x.id === demandId);
                 if (!d) return;
+                const totalPoints = typeof record === 'string'
+                    ? d.points
+                    : (record.totalPoints ?? ((record.points || 0) + (record.bonusPoints || 0)));
+                const variantLabel = typeof record === 'string' || record.variantId === 'normal'
+                    ? ''
+                    : `/${record.variantLabel}`;
                 const row = document.createElement('div');
                 row.style.cssText = 'font-size:0.8rem; margin-bottom:3px; display:flex; align-items:center; gap:6px;';
-                row.innerHTML = `<span>📜 ${d.name} (${d.points}点)</span>`;
+                row.innerHTML = `<span>📜 ${d.name}${variantLabel} (${totalPoints}点)</span>`;
 
                 // 効果ボタン
                 if (isCurrentPlayer && d.effect === 'free_processing_plant' && game.turnState?.freeProcessingPlant) {
@@ -653,6 +842,15 @@ export class UIManager {
                     btn.style.cssText = 'font-size:0.7rem; padding:2px 8px; background:#5a7a2b;';
                     btn.id = 'btn-use-discounted-exchange';
                     btn.addEventListener('click', () => this.startDiscountedExchangeMode(game));
+                    row.appendChild(btn);
+                }
+                if (isCurrentPlayer && d.effect === 'normal_market_exchange' && game.turnState?.freeMarketExchange) {
+                    const btn = document.createElement('button');
+                    btn.textContent = '使用する';
+                    btn.className = 'btn action-btn';
+                    btn.style.cssText = 'font-size:0.7rem; padding:2px 8px; background:#5a7a2b;';
+                    btn.id = 'btn-use-free-market-exchange';
+                    btn.addEventListener('click', () => this.startFreeMarketExchangeMode(game));
                     row.appendChild(btn);
                 }
                 demandsCont.appendChild(row);
@@ -729,6 +927,7 @@ export class UIManager {
         const overlay = document.getElementById('gain-resource-overlay');
         if (!overlay) return;
         overlay.classList.remove('hidden');
+        this.renderPopupFieldPreview('gain-resource-field-preview', game);
 
         const container = document.getElementById('gain-resource-cards');
         container.innerHTML = '';
@@ -749,6 +948,7 @@ export class UIManager {
         const overlay = document.getElementById('market-replace-overlay');
         if (!overlay) return;
         overlay.classList.remove('hidden');
+        this.renderPopupFieldPreview('market-replace-field-preview', game);
 
         const container = document.getElementById('market-replace-cards');
         container.innerHTML = '';
@@ -773,8 +973,8 @@ export class UIManager {
         });
     }
 
-    // 効果: 国家備蓄 — 手札を最大2枚交換し、同数の基本資源を得る
-    renderStockpileExchangePhase(game) {
+    // 効果: 国家備蓄/住宅整備 — 手札を交換し、同数の基本資源を得る
+    renderHandExchangePhase(game, maxCount, title, description) {
         const overlay = document.getElementById('stockpile-exchange-overlay');
         if (!overlay) return;
         overlay.classList.remove('hidden');
@@ -782,10 +982,16 @@ export class UIManager {
         const player = game.getCurrentPlayer();
         this._stockpileDiscardSelected = [];
         this._stockpileGainCounts = {};
+        this._handExchangeMaxCount = maxCount;
 
+        const titleEl = document.getElementById('stockpile-title');
+        const descEl = document.getElementById('stockpile-desc');
         const handContainer = document.getElementById('stockpile-hand-cards');
         const gainContainer = document.getElementById('stockpile-gain-cards');
         const countEl = document.getElementById('stockpile-count');
+        if (titleEl) titleEl.textContent = `📜 ${title}の効果`;
+        if (descEl) descEl.textContent = description;
+        this.renderPopupFieldPreview('stockpile-field-preview', game);
         if (!handContainer || !gainContainer || !countEl) return;
 
         const updateCount = () => {
@@ -797,12 +1003,12 @@ export class UIManager {
         handContainer.innerHTML = '';
         player.hand.forEach((resId, idx) => {
             const r = Resources[resId];
-            const card = this.createCardElement(r.name, r.type === 'base' ? '基本資源' : '交易品', r.icon, `resource ${r.type}`, (el) => {
+            const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), (el) => {
                 const selectedIdx = this._stockpileDiscardSelected.indexOf(idx);
                 if (selectedIdx > -1) {
                     this._stockpileDiscardSelected.splice(selectedIdx, 1);
                     el.classList.remove('selected');
-                } else if (this._stockpileDiscardSelected.length < 2) {
+                } else if (this._stockpileDiscardSelected.length < maxCount) {
                     this._stockpileDiscardSelected.push(idx);
                     el.classList.add('selected');
                 }
@@ -858,6 +1064,7 @@ export class UIManager {
         const overlay = document.getElementById('free-plant-overlay');
         if (!overlay) return;
         overlay.classList.remove('hidden');
+        this.renderPopupFieldPreview('free-plant-field-preview', game);
 
         const player = game.getCurrentPlayer();
         this._freePlantSpecialty = null;
@@ -884,7 +1091,7 @@ export class UIManager {
         player.hand.forEach((resId, idx) => {
             const r = Resources[resId];
             if (r.type !== ResourceTypes.BASE) return;
-            const card = this.createCardElement(r.name, '基本資源', r.icon, `resource base`, (el) => {
+            const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), (el) => {
                 Array.from(handCont.children).forEach(c => c.classList.remove('selected'));
                 this._freePlantHandIndex = idx;
                 el.classList.add('selected');
@@ -897,5 +1104,11 @@ export class UIManager {
     startDiscountedExchangeMode(game) {
         this._discountedExchangeMode = true;
         alert('割引交換モード：手札から資源を選択し、マーケットの資源を選んで「マーケット交換」ボタンを押してください。\n(基本1→基本1 / 基本2→交易1 / 交易1→基本1 / 交易1→交易1)');
+    }
+
+    // 効果: 船団整備 — 通常マーケット交換モード開始
+    startFreeMarketExchangeMode(game) {
+        this._freeMarketExchangeMode = true;
+        alert('船団整備の効果：手札から通常レート分の資源を選択し、マーケットの資源を選んで「マーケット交換」ボタンを押してください。\nこの交換ではAPを消費しません。');
     }
 }

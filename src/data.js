@@ -58,14 +58,76 @@ export const FixedRoles = [
 
 export const Demands = [
     // 基本需要 10枚
-    { id: 'd_basic1', name: '王都建設', reqText: '木材+石材+鉄', req: { wood: 1, stone: 1, iron: 1 }, points: 5 },
-    { id: 'd_basic2', name: '城壁修復', reqText: '石材+粘土+鉄', req: { stone: 1, clay: 1, iron: 1 }, points: 5 },
-    { id: 'd_basic3', name: '船団整備', reqText: '木材+鉄+魚', req: { wood: 1, iron: 1, fish: 1 }, points: 5 },
-    { id: 'd_basic4', name: '冬支度', reqText: '木材+小麦+羊毛', req: { wood: 1, wheat: 1, wool: 1 }, points: 4 },
-    { id: 'd_basic5', name: '兵站整備', reqText: '小麦+魚+鉄', req: { wheat: 1, fish: 1, iron: 1 }, points: 4, effect: 'bonus_ap_next_turn' },
-    { id: 'd_basic6', name: '灌漑事業', reqText: '木材+石材+小麦', req: { wood: 1, stone: 1, wheat: 1 }, points: 5 },
-    { id: 'd_basic7', name: '住宅整備', reqText: '木材+粘土+羊毛', req: { wood: 1, clay: 1, wool: 1 }, points: 4 },
-    { id: 'd_basic8', name: '工房街整備', reqText: '木材+粘土+鉄', req: { wood: 1, clay: 1, iron: 1 }, points: 4, effect: 'free_processing_plant' },
+    {
+        id: 'd_basic1',
+        name: '王都建設',
+        reqText: '通常: 木材+石材+鉄 / サブ: 木材+石材+任意交易品',
+        req: { wood: 1, stone: 1, iron: 1 },
+        points: 5,
+        variants: [
+            { id: 'normal', label: '通常', req: { wood: 1, stone: 1, iron: 1 }, points: 5 },
+            { id: 'sub', label: 'サブ', req: { wood: 1, stone: 1, _anyTrade: 1 }, points: 4 }
+        ]
+    },
+    {
+        id: 'd_basic2',
+        name: '城壁修復',
+        reqText: '通常: 石材+粘土+鉄 / サブ: 石材+粘土+任意交易品',
+        req: { stone: 1, clay: 1, iron: 1 },
+        points: 5,
+        variants: [
+            { id: 'normal', label: '通常', req: { stone: 1, clay: 1, iron: 1 }, points: 5 },
+            { id: 'sub', label: 'サブ', req: { stone: 1, clay: 1, _anyTrade: 1 }, points: 4 }
+        ]
+    },
+    { id: 'd_basic3', name: '船団整備', reqText: '木材+鉄+魚 (効果:通常交換)', req: { wood: 1, iron: 1, fish: 1 }, points: 4, effect: 'normal_market_exchange' },
+    {
+        id: 'd_basic4',
+        name: '冬支度',
+        reqText: '通常: 木材+小麦+羊毛 / サブ: 小麦+羊毛+任意交易品',
+        req: { wood: 1, wheat: 1, wool: 1 },
+        points: 4,
+        variants: [
+            { id: 'normal', label: '通常', req: { wood: 1, wheat: 1, wool: 1 }, points: 4 },
+            { id: 'sub', label: 'サブ', req: { wheat: 1, wool: 1, _anyTrade: 1 }, points: 3 }
+        ]
+    },
+    {
+        id: 'd_basic5',
+        name: '兵站整備',
+        reqText: '通常: 小麦+魚+鉄 / サブ: 小麦+魚+任意交易品',
+        req: { wheat: 1, fish: 1, iron: 1 },
+        points: 4,
+        effect: 'bonus_ap_next_turn',
+        variants: [
+            { id: 'normal', label: '通常', req: { wheat: 1, fish: 1, iron: 1 }, points: 4 },
+            { id: 'sub', label: 'サブ', req: { wheat: 1, fish: 1, _anyTrade: 1 }, points: 3 }
+        ]
+    },
+    {
+        id: 'd_basic6',
+        name: '灌漑事業',
+        reqText: '通常: 木材+石材+小麦 / サブ: 木材+小麦+任意交易品',
+        req: { wood: 1, stone: 1, wheat: 1 },
+        points: 5,
+        variants: [
+            { id: 'normal', label: '通常', req: { wood: 1, stone: 1, wheat: 1 }, points: 5 },
+            { id: 'sub', label: 'サブ', req: { wood: 1, wheat: 1, _anyTrade: 1 }, points: 4 }
+        ]
+    },
+    { id: 'd_basic7', name: '住宅整備', reqText: '木材+粘土+羊毛 (効果:手札1枚交換)', req: { wood: 1, clay: 1, wool: 1 }, points: 3, effect: 'hand_exchange_1' },
+    {
+        id: 'd_basic8',
+        name: '工房街整備',
+        reqText: '通常: 木材+粘土+鉄 / サブ: 木材+粘土+任意交易品',
+        req: { wood: 1, clay: 1, iron: 1 },
+        points: 4,
+        effect: 'free_processing_plant',
+        variants: [
+            { id: 'normal', label: '通常', req: { wood: 1, clay: 1, iron: 1 }, points: 4 },
+            { id: 'sub', label: 'サブ', req: { wood: 1, clay: 1, _anyTrade: 1 }, points: 3 }
+        ]
+    },
     { id: 'd_basic9', name: '食料市', reqText: '小麦+魚+任意の基本資源1', req: { wheat: 1, fish: 1, _anyBase: 1 }, points: 3, effect: 'gain_base_resource' },
     { id: 'd_basic10', name: '国家備蓄', reqText: '異なる基本資源4種', req: { _diffBase: 4 }, points: 5, effect: 'stockpile_exchange' },
     // 加工ボーナス需要 10枚
@@ -101,6 +163,20 @@ export const createDemandDeck = () => {
     return Demands.map(d => d.id).sort(() => Math.random() - 0.5); // シャッフル
 };
 
+export const getDemandVariants = (demand) => {
+    if (Array.isArray(demand.variants) && demand.variants.length > 0) {
+        return demand.variants;
+    }
+
+    return [{
+        id: 'normal',
+        label: '通常',
+        req: demand.req,
+        points: demand.points,
+        reqText: demand.reqText
+    }];
+};
+
 export const createSpecialtyDeck = () => {
     let deck = [];
     // 12種 × 各3枚 = 36枚
@@ -109,4 +185,3 @@ export const createSpecialtyDeck = () => {
     });
     return deck.sort(() => Math.random() - 0.5);
 };
-

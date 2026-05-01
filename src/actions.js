@@ -1,4 +1,4 @@
-import { Resources, ResourceTypes, Demands, FixedRoles } from './data.js';
+import { Resources, ResourceTypes, Demands, FixedRoles, getDemandVariants } from './data.js';
 import { logger } from './logger.js';
 
 export const ActionValidator = {
@@ -129,10 +129,31 @@ export const ActionValidator = {
         tryFulfill(tempCards, 0);
 
         return { valid: isValid, bonusPoints: maxBonusPts };
+    },
+
+    checkDemandRequirements: (handCards, demand, processedResources = []) => {
+        let best = null;
+
+        getDemandVariants(demand).forEach(variant => {
+            const check = ActionValidator.checkRequirements(handCards, variant.req, processedResources, demand.bonus);
+            if (!check.valid) return;
+
+            const totalPoints = variant.points + check.bonusPoints;
+            if (!best || totalPoints > best.totalPoints) {
+                best = {
+                    valid: true,
+                    variant,
+                    bonusPoints: check.bonusPoints,
+                    totalPoints
+                };
+            }
+        });
+
+        return best || { valid: false, bonusPoints: 0, totalPoints: 0 };
     }
 };
 
-export const executeExchange = (game, player, handIndices, marketIndex) => {
+export const executeExchange = (game, player, handIndices, marketIndex, options = {}) => {
     const handCards = handIndices.map(i => player.hand[i]);
     const marketCards = [game.marketCards[marketIndex]];
 
@@ -151,9 +172,15 @@ export const executeExchange = (game, player, handIndices, marketIndex) => {
 
     // 取られた枠は空き枠（null）として残す
 
-    logger.log(`${player.name} がマーケット交換を実行: ${handCards.map(id => Resources[id].name).join(', ')} → ${Resources[obtained].name}`);
+    const sourceSuffix = options.source ? `（${options.source}）` : '';
+    logger.log(`${player.name} がマーケット交換を実行${sourceSuffix}: ${handCards.map(id => Resources[id].name).join(', ')} → ${Resources[obtained].name}`);
 
-    game.useAction();
+    if (options.free) {
+        if (game.turnState) game.turnState.freeMarketExchange = false;
+        game.notifyChange();
+    } else {
+        game.useAction();
+    }
     return { success: true };
 };
 
@@ -173,7 +200,7 @@ export const executeDemand = (game, player, demandId, handIndices) => {
 
     const handCards = handIndices.map(i => player.hand[i]);
     const processedResources = player.processingPlants || [];
-    const check = ActionValidator.checkRequirements(handCards, demand.req, processedResources, demand.bonus);
+    const check = ActionValidator.checkDemandRequirements(handCards, demand, processedResources);
 
     if (!check.valid) {
         return { success: false, msg: '条件を満たしていません。リソースの組み合わせを確認してください。' };
@@ -182,8 +209,15 @@ export const executeDemand = (game, player, demandId, handIndices) => {
     handIndices.sort((a, b) => b - a).forEach(idx => player.hand.splice(idx, 1));
     game.demandCards.splice(dIndex, 1);
 
-    player.achievedDemands.push(demandId);
-    const totalPoints = demand.points + check.bonusPoints;
+    const totalPoints = check.totalPoints;
+    player.achievedDemands.push({
+        demandId,
+        variantId: check.variant.id,
+        variantLabel: check.variant.label,
+        points: check.variant.points,
+        bonusPoints: check.bonusPoints,
+        totalPoints
+    });
     player.score += totalPoints;
     if (isAdditionalDemand) {
         game.actionsLeft--;
@@ -196,8 +230,9 @@ export const executeDemand = (game, player, demandId, handIndices) => {
         game.demandCards.push(game.demandDeck.pop());
     }
 
+    const variantMsg = check.variant.id === 'normal' ? '' : `（${check.variant.label}条件）`;
     const bonusMsg = check.bonusPoints > 0 ? ` (加工ボーナス +${check.bonusPoints})` : '';
-    logger.log(`${player.name} が需要達成: ${demand.name} (+${totalPoints}点)${bonusMsg}`);
+    logger.log(`${player.name} が需要達成: ${demand.name}${variantMsg} (+${totalPoints}点)${bonusMsg}`);
 
     // 効果の発動
     if (demand.effect) {
@@ -206,6 +241,8 @@ export const executeDemand = (game, player, demandId, handIndices) => {
             logger.log(`${player.name} が「兵站整備」効果を得ました。次のターンに+1APが追加されます。`);
         } else if (demand.effect === 'stockpile_exchange') {
             game.phase = 'stockpile_exchange';
+        } else if (demand.effect === 'hand_exchange_1') {
+            game.phase = 'hand_exchange_1';
         } else if (demand.effect === 'gain_base_resource') {
             // UIフェーズ変更で処理（CPUは自動選択）
             game.phase = 'gain_resource';
@@ -218,6 +255,9 @@ export const executeDemand = (game, player, demandId, handIndices) => {
         } else if (demand.effect === 'discounted_exchange') {
             game.turnState.discountedExchange = true;
             logger.log(`${player.name} が「大商館納品」効果を得ました。割引レートでマーケット交換を1回行えます。`);
+        } else if (demand.effect === 'normal_market_exchange') {
+            game.turnState.freeMarketExchange = true;
+            logger.log(`${player.name} が「船団整備」効果を得ました。AP不要で通常のマーケット交換を1回行えます。`);
         }
     }
 

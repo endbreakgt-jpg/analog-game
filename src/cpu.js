@@ -1,4 +1,4 @@
-import { Demands, FixedRoles, Resources, ResourceTypes, Specialties } from './data.js';
+import { Demands, FixedRoles, Resources, ResourceTypes, Specialties, getDemandVariants } from './data.js';
 import * as Actions from './actions.js';
 
 // =============================================
@@ -131,7 +131,18 @@ function getBaseResourceNeedScores(game, player, hand = player.hand, excludedDem
         .filter(Boolean);
     const roleObjs = FixedRoles.filter(r => !player.achievedRoles.includes(r.id));
 
-    [...demandObjs, ...roleObjs].forEach(obj => {
+    demandObjs.forEach(demand => {
+        getDemandVariants(demand).forEach(variant => {
+            Object.entries(variant.req).forEach(([key, val]) => {
+                if (!key.startsWith('_') && Resources[key]?.type === ResourceTypes.BASE) {
+                    const has = hand.filter(id => id === key).length;
+                    scores[key] = (scores[key] || 0) + Math.max(0, val - has);
+                }
+            });
+        });
+    });
+
+    roleObjs.forEach(obj => {
         Object.entries(obj.req).forEach(([key, val]) => {
             if (!key.startsWith('_') && Resources[key]?.type === ResourceTypes.BASE) {
                 const has = hand.filter(id => id === key).length;
@@ -162,9 +173,10 @@ function hasRelevantProcessingOpportunity(game, player, hand = player.hand, excl
         ...FixedRoles.filter(r => !player.achievedRoles.includes(r.id))
     ].filter(Boolean);
 
+    const getReqs = (obj) => obj.variants ? getDemandVariants(obj).map(variant => variant.req) : [obj.req];
+
     return targets.some(obj =>
-        obj.req?._anyProcessed ||
-        obj.req?._diffProcessed ||
+        getReqs(obj).some(req => req?._anyProcessed || req?._diffProcessed) ||
         (obj.bonus?.targets || []).some(resourceId => buildableResources.includes(resourceId))
     );
 }
@@ -176,7 +188,9 @@ function countLowValueMarketCards(game, excludedDemandId = null) {
         .filter(Boolean);
     return game.marketCards.filter(resourceId => {
         if (!resourceId) return false;
-        return !demandObjs.some(demand => demand.req[resourceId] > 0);
+        return !demandObjs.some(demand =>
+            getDemandVariants(demand).some(variant => variant.req[resourceId] > 0)
+        );
     }).length;
 }
 
@@ -217,6 +231,18 @@ const DemandEffectEstimators = {
         const simulatedPlayer = { ...player, hand: remainingHand };
         const trades = getValidDiscountedMarketTrades(simulatedPlayer, game.marketCards);
         return trades.length > 0 ? 1.5 : 0.3;
+    },
+    normal_market_exchange: ({ game, player, remainingHand }) => {
+        const simulatedPlayer = { ...player, hand: remainingHand };
+        const trades = getValidMarketTrades(simulatedPlayer, game.marketCards);
+        return trades.length > 0 ? 1.25 : 0.25;
+    },
+    hand_exchange_1: ({ game, player, demand, remainingHand }) => {
+        if (remainingHand.length === 0) return 0.2;
+        const needScores = getBaseResourceNeedScores(game, player, remainingHand, demand.id);
+        const wantedCount = Object.values(needScores).filter(score => score > 0).length;
+        const disposableCount = remainingHand.filter(resourceId => (needScores[resourceId] || 0) === 0).length;
+        return wantedCount > 0 && disposableCount > 0 ? 1 : 0.4;
     }
 };
 
@@ -229,10 +255,10 @@ function estimateDemandEffectValue(game, player, demand, remainingHand) {
     return Math.max(0, Math.min(MAX_EFFECT_VALUE, value));
 }
 
-function evaluateDemandScore(game, player, demand, check, hand, usedIndices) {
+function evaluateDemandScore(game, player, demand, variant, check, hand, usedIndices) {
     const remainingHand = [...hand];
     [...usedIndices].sort((a, b) => b - a).forEach(idx => remainingHand.splice(idx, 1));
-    return demand.points + check.bonusPoints + estimateDemandEffectValue(game, player, demand, remainingHand);
+    return variant.points + check.bonusPoints + estimateDemandEffectValue(game, player, demand, remainingHand);
 }
 
 function getBestDemandEvaluation(game, player, demand, hand = player.hand) {
@@ -240,14 +266,16 @@ function getBestDemandEvaluation(game, player, demand, hand = player.hand) {
     const subsets = getAllSubsets(hand.map((_, i) => i));
     let best = null;
 
-    for (const subset of subsets) {
-        const cards = subset.map(i => hand[i]);
-        const check = Actions.ActionValidator.checkRequirements(cards, demand.req, processed, demand.bonus);
-        if (!check.valid) continue;
+    for (const variant of getDemandVariants(demand)) {
+        for (const subset of subsets) {
+            const cards = subset.map(i => hand[i]);
+            const check = Actions.ActionValidator.checkRequirements(cards, variant.req, processed, demand.bonus);
+            if (!check.valid) continue;
 
-        const score = evaluateDemandScore(game, player, demand, check, hand, subset);
-        if (!best || score > best.score) {
-            best = { demand, handIndices: subset, check, score };
+            const score = evaluateDemandScore(game, player, demand, variant, check, hand, subset);
+            if (!best || score > best.score) {
+                best = { demand, variant, handIndices: subset, check, score };
+            }
         }
     }
 
@@ -314,8 +342,8 @@ function chooseCpuMarketTrade(game, player) {
             if (afterEval && !nowEval) {
                 score += afterEval.score;
             } else if (!afterEval) {
-                const before = missingCount(player.hand, demand.req);
-                const after = missingCount(simHand, demand.req);
+                const before = Math.min(...getDemandVariants(demand).map(variant => missingCount(player.hand, variant.req)));
+                const after = Math.min(...getDemandVariants(demand).map(variant => missingCount(simHand, variant.req)));
                 if (after < before) score += 2;
             }
         }
@@ -365,6 +393,8 @@ export class CPU {
             return this.cpuMarketReplace(game, player);
         } else if (game.phase === 'stockpile_exchange') {
             return this.cpuStockpileExchange(game, player);
+        } else if (game.phase === 'hand_exchange_1') {
+            return this.cpuHandExchange(game, player, 1, '住宅整備');
         } else if (game.phase === 'playing') {
             return this.cpuTurn(game, player);
         }
@@ -392,21 +422,7 @@ export class CPU {
 
     // 効果: 食料市 — 最も欲しい基本資源を自動選択
     static cpuGainResource(game, player) {
-        const demandObjs = game.demandCards.map(id => Demands.find(d => d.id === id)).filter(Boolean);
-        const roleObjs = FixedRoles.filter(r => !player.achievedRoles.includes(r.id));
-        const scores = {};
-
-        // 需要・役の要求から欲しい資源を集計
-        [...demandObjs, ...roleObjs].forEach(obj => {
-            if (!obj) return;
-            Object.entries(obj.req).forEach(([key, val]) => {
-                if (!key.startsWith('_') && Resources[key] && Resources[key].type === ResourceTypes.BASE) {
-                    const has = player.hand.filter(id => id === key).length;
-                    const need = Math.max(0, val - has);
-                    scores[key] = (scores[key] || 0) + need;
-                }
-            });
-        });
+        const scores = this.getBaseResourceNeedScores(game, player);
 
         // 最もスコアが高い基本資源を選択（なければ木材）
         const baseResources = Object.values(Resources).filter(r => r.type === ResourceTypes.BASE);
@@ -429,7 +445,11 @@ export class CPU {
             if (!id) return { i, score: -999 };
             let score = 0;
             demandObjs.forEach(d => {
-                if (d.req[id]) score += d.req[id];
+                getDemandVariants(d).forEach(variant => {
+                    if (variant.req[id]) score += variant.req[id];
+                    if (Resources[id].type === ResourceTypes.TRADE && variant.req._anyTrade) score += 0.75;
+                    if (Resources[id].type === ResourceTypes.BASE && variant.req._anyBase) score += 0.5;
+                });
             });
             return { i, score };
         });
@@ -442,6 +462,10 @@ export class CPU {
 
     // 効果: 国家備蓄 — 不要度の低い手札を最大2枚、必要度の高い基本資源に交換する
     static cpuStockpileExchange(game, player) {
+        return this.cpuHandExchange(game, player, 2, '国家備蓄');
+    }
+
+    static cpuHandExchange(game, player, maxCount, sourceName) {
         const scores = this.getBaseResourceNeedScores(game, player);
         const wantedResources = Object.values(Resources)
             .filter(r => r.type === ResourceTypes.BASE)
@@ -450,7 +474,7 @@ export class CPU {
             .sort((a, b) => b.score - a.score);
 
         if (wantedResources.length === 0 || player.hand.length === 0) {
-            game.completeStockpileExchange(player.id, [], []);
+            game.completeHandExchange(player.id, [], [], maxCount, sourceName);
             return true;
         }
 
@@ -458,11 +482,11 @@ export class CPU {
             .map((id, i) => ({ i, score: scores[id] || 0 }))
             .sort((a, b) => a.score - b.score);
 
-        const exchangeCount = Math.min(2, wantedResources.length, discardCandidates.length);
+        const exchangeCount = Math.min(maxCount, wantedResources.length, discardCandidates.length);
         const discardIndices = discardCandidates.slice(0, exchangeCount).map(x => x.i);
         const gainResources = wantedResources.slice(0, exchangeCount).map(x => x.id);
 
-        game.completeStockpileExchange(player.id, discardIndices, gainResources);
+        game.completeHandExchange(player.id, discardIndices, gainResources, maxCount, sourceName);
         return true;
     }
 
@@ -487,8 +511,54 @@ export class CPU {
         return res.success;
     }
 
+    static resolvePendingTurnEffect(game, player) {
+        if (game.turnState.freeProcessingPlant) {
+            const processed = player.processingPlants || [];
+            for (let i = 0; i < player.activeSpecialties.length; i++) {
+                const sId = player.activeSpecialties[i];
+                const spec = Specialties[sId];
+                if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
+                if (processed.includes(spec.resource)) continue;
+                const handIdx = player.hand.indexOf(spec.resource);
+                if (handIdx === -1) continue;
+                const res = Actions.executeBuildProcessingPlant(game, player, sId, handIdx, true);
+                if (res.success) return true;
+            }
+            game.turnState.freeProcessingPlant = false;
+        }
+
+        if (game.turnState.freeMarketExchange) {
+            const best = chooseCpuMarketTrade(game, player);
+            if (best) {
+                const res = Actions.executeExchange(game, player, best.handIndices, best.marketIndex, {
+                    free: true,
+                    source: '船団整備効果'
+                });
+                if (res.success) return true;
+            }
+            game.turnState.freeMarketExchange = false;
+        }
+
+        if (game.turnState.discountedExchange) {
+            const discountTrades = getValidDiscountedMarketTrades(player, game.marketCards);
+            if (discountTrades.length > 0) {
+                const best = discountTrades[0];
+                const res = Actions.executeDiscountedExchange(game, player, best.handIndices, best.marketIndex);
+                if (res.success) return true;
+            }
+            game.turnState.discountedExchange = false;
+        }
+
+        return false;
+    }
+
     static cpuTurn(game, player) {
         const processed = player.processingPlants || [];
+
+        // 需要達成で得た即時効果は、次の通常アクションより先に処理する。
+        if (this.resolvePendingTurnEffect(game, player)) {
+            return true;
+        }
 
         // -------------------------------------------------
         // 優先度1: 需要カードの達成 (1回目は無料)
@@ -569,37 +639,6 @@ export class CPU {
                 const res = Actions.executeExchange(game, player, best.handIndices, best.marketIndex);
                 if (res.success) return true;
             }
-        }
-
-        // -------------------------------------------------
-        // 効果フラグ: 工房街整備 — 未使用なら加工所を建設
-        // -------------------------------------------------
-        if (game.turnState.freeProcessingPlant) {
-            for (let i = 0; i < player.activeSpecialties.length; i++) {
-                const sId = player.activeSpecialties[i];
-                const spec = Specialties[sId];
-                if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
-                if (processed.includes(spec.resource)) continue;
-                const handIdx = player.hand.indexOf(spec.resource);
-                if (handIdx === -1) continue;
-                const res = Actions.executeBuildProcessingPlant(game, player, sId, handIdx, true);
-                if (res.success) return true;
-            }
-            // 建設できない場合はフラグをリセットして終了
-            game.turnState.freeProcessingPlant = false;
-        }
-
-        // -------------------------------------------------
-        // 効果フラグ: 大商館納品 — 未使用なら割引交換を実行
-        // -------------------------------------------------
-        if (game.turnState.discountedExchange) {
-            const discountTrades = getValidDiscountedMarketTrades(player, game.marketCards);
-            if (discountTrades.length > 0) {
-                const best = discountTrades[0];
-                const res = Actions.executeDiscountedExchange(game, player, best.handIndices, best.marketIndex);
-                if (res.success) return true;
-            }
-            game.turnState.discountedExchange = false;
         }
 
         // -------------------------------------------------

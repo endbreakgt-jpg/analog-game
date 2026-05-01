@@ -182,7 +182,8 @@ export class GameState {
             demandAchieveCount: 0,
             roleAchieved: false,
             freeProcessingPlant: false,
-            discountedExchange: false
+            discountedExchange: false,
+            freeMarketExchange: false
         };
         this.phase = 'playing';
         const p = this.getCurrentPlayer();
@@ -224,16 +225,16 @@ export class GameState {
         this.notifyChange();
     }
 
-    // 効果: 国家備蓄 — 手札を最大2枚交換し、同数の基本資源を得る
-    completeStockpileExchange(playerId, discardIndices, resourceIds) {
+    // 効果: 国家備蓄/住宅整備 — 手札を交換し、同数の基本資源を得る
+    completeHandExchange(playerId, discardIndices, resourceIds, maxCount = 2, sourceName = '国家備蓄') {
         const p = this.players.find(x => x.id === playerId);
         if (!p) return;
 
-        const discards = [...discardIndices].slice(0, 2);
-        const gains = [...resourceIds].slice(0, 2);
+        const discards = [...discardIndices].slice(0, maxCount);
+        const gains = [...resourceIds].slice(0, maxCount);
 
         if (discards.length !== gains.length) {
-            logger.log('【警告】国家備蓄の破棄枚数と獲得枚数が一致しないため、効果を中断しました。');
+            logger.log(`【警告】${sourceName}の破棄枚数と獲得枚数が一致しないため、効果を中断しました。`);
             this.phase = 'playing';
             this.notifyChange();
             return;
@@ -253,11 +254,15 @@ export class GameState {
             const gainedText = gains.length > 0
                 ? gains.map(id => Resources[id].name).join(', ')
                 : 'なし';
-            logger.log(`${p.name} が国家備蓄の効果を解決しました。破棄: ${discardedText} / 獲得: ${gainedText}`);
+            logger.log(`${p.name} が${sourceName}の効果を解決しました。破棄: ${discardedText} / 獲得: ${gainedText}`);
         });
 
         this.phase = 'playing';
         this.notifyChange();
+    }
+
+    completeStockpileExchange(playerId, discardIndices, resourceIds) {
+        this.completeHandExchange(playerId, discardIndices, resourceIds, 2, '国家備蓄');
     }
 
     // 効果: 造船材調達 — マーケットを最大2枚入れ替える
@@ -413,9 +418,13 @@ export class GameState {
             const sortedPlayers = [...this.players].sort((a, b) => b.score - a.score);
             sortedPlayers.forEach((p, i) => {
                 let demandPts = 0;
-                p.achievedDemands.forEach(id => {
-                    const d = Demands.find(x => x.id === id);
-                    if (d) demandPts += d.points;
+                p.achievedDemands.forEach(record => {
+                    if (typeof record === 'string') {
+                        const d = Demands.find(x => x.id === record);
+                        if (d) demandPts += d.points;
+                    } else {
+                        demandPts += record.points || 0;
+                    }
                 });
                 let rolePts = 0;
                 p.achievedRoles.forEach(id => {

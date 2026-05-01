@@ -47,11 +47,7 @@
                     id="setup-action-name">初期配置</span></h2>
             <p id="setup-desc">初期特産品5枚のうち、最初から稼働させる3枚を選択してください。</p>
 
-            <div style="margin:15px 0;">
-                <p style="font-size:0.9rem; color:var(--accent-red); margin-bottom:5px;">現在の公開需要カード</p>
-                <div id="setup-demand-cards" class="card-row"
-                    style="justify-content:center; transform:scale(0.85); transform-origin:center top;"></div>
-            </div>
+            <div id="setup-field-preview" class="popup-field-preview"></div>
 
             <div id="setup-specialties" class="card-row" style="justify-content:center; margin:20px 0;">
                 <!-- JSで描画 -->
@@ -71,11 +67,7 @@
                 手札が上限(<span id="discard-max"></span>枚)を超えています。<span id="discard-excess"></span>枚選択して破棄してください。
             </p>
 
-            <div style="margin:15px 0;">
-                <p style="font-size:0.9rem; color:var(--accent-red); margin-bottom:5px;">現在の公開需要カード</p>
-                <div id="discard-demand-cards" class="card-row"
-                    style="justify-content:center; transform:scale(0.85); transform-origin:center top;"></div>
-            </div>
+            <div id="discard-field-preview" class="popup-field-preview"></div>
 
             <div style="margin:20px 0;">
                 <p style="font-size:1rem; font-weight:bold; margin-bottom:10px;">手札 (クリックして破棄対象を選択)</p>
@@ -114,6 +106,7 @@
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:600px; width:95%;">
             <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 食料市の効果</h2>
             <p style="margin-bottom:18px;">任意の基本資源を1枚選んで手札に加えてください。</p>
+            <div id="gain-resource-field-preview" class="popup-field-preview"></div>
             <div id="gain-resource-cards" class="card-row"
                 style="justify-content:center; flex-wrap:wrap; margin-bottom:18px;"></div>
             <button id="btn-gain-resource-confirm" class="btn primary-btn"
@@ -128,6 +121,7 @@
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
             <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 造船材調達の効果</h2>
             <p style="margin-bottom:8px;">マーケットのカードを<strong>最大2枚まで</strong>選んで入れ替えます（0枚でもOK）。</p>
+            <div id="market-replace-field-preview" class="popup-field-preview"></div>
             <div id="market-replace-cards" class="card-row"
                 style="justify-content:center; flex-wrap:wrap; margin:15px 0;"></div>
             <p id="market-replace-count" style="font-size:0.9rem; color:var(--accent-red); margin-bottom:12px;">選択中: 0 枚
@@ -142,9 +136,10 @@
         style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
         <div
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:900px; width:95%;">
-            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 国家備蓄の効果</h2>
-            <p style="margin-bottom:6px;">手札を最大2枚まで破棄し、同じ枚数だけ好きな基本資源を得ます（0枚でもOK）。</p>
+            <h2 id="stockpile-title" style="font-size:1.4rem; margin-bottom:8px;">📜 国家備蓄の効果</h2>
+            <p id="stockpile-desc" style="margin-bottom:6px;">手札を最大2枚まで破棄し、同じ枚数だけ好きな基本資源を得ます（0枚でもOK）。</p>
             <p id="stockpile-count" style="font-size:0.9rem; color:var(--accent-red); margin-bottom:12px;">破棄: 0枚 / 獲得: 0枚</p>
+            <div id="stockpile-field-preview" class="popup-field-preview"></div>
             <div style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap; margin:15px 0;">
                 <div style="min-width:280px;">
                     <p style="font-size:0.9rem; margin-bottom:6px;">破棄する手札</p>
@@ -167,6 +162,7 @@
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
             <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 工房街整備の効果</h2>
             <p style="margin-bottom:6px;">加工所を建設する特産品と、支払う資源を選んでください。<strong>（AP不要・資源コストは通常通り）</strong></p>
+            <div id="free-plant-field-preview" class="popup-field-preview"></div>
             <div style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap; margin:15px 0;">
                 <div>
                     <p style="font-size:0.9rem; margin-bottom:6px;">稼働中の基本特産品</p>
