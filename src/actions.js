@@ -1,4 +1,4 @@
-import { Resources, ResourceTypes, Demands, FixedRoles, getDemandVariants } from './data.js';
+import { Resources, ResourceTypes, Demands, FixedRoles, Specialties, getDemandVariants } from './data.js';
 import { logger } from './logger.js';
 
 export const ActionValidator = {
@@ -237,8 +237,8 @@ export const executeDemand = (game, player, demandId, handIndices) => {
     // 効果の発動
     if (demand.effect) {
         if (demand.effect === 'bonus_ap_next_turn') {
-            player.bonusApNextTurn = true;
-            logger.log(`${player.name} が「兵站整備」効果を得ました。次のターンに+1APが追加されます。`);
+            game.actionsLeft += 1;
+            logger.log(`${player.name} が「兵站整備」効果を得ました。このターン中のAPが+1されます。`);
         } else if (demand.effect === 'stockpile_exchange') {
             game.phase = 'stockpile_exchange';
         } else if (demand.effect === 'hand_exchange_1') {
@@ -251,7 +251,7 @@ export const executeDemand = (game, player, demandId, handIndices) => {
             game.phase = 'market_replace';
         } else if (demand.effect === 'free_processing_plant') {
             game.turnState.freeProcessingPlant = true;
-            logger.log(`${player.name} が「工房街整備」効果を得ました。AP不要で加工所を1回建設できます。`);
+            logger.log(`${player.name} が「工房街整備」効果を得ました。AP・資源コストなしで加工所を1回建設できます。`);
         } else if (demand.effect === 'discounted_exchange') {
             game.turnState.discountedExchange = true;
             logger.log(`${player.name} が「大商館納品」効果を得ました。割引レートでマーケット交換を1回行えます。`);
@@ -295,37 +295,39 @@ export const executeFixedRole = (game, player, roleId, handIndices) => {
 };
 
 export const executeBuildProcessingPlant = (game, player, specialtyId, handIndex, isFree = false) => {
-    import('./data.js').then(({ Specialties, Resources, ResourceTypes }) => {
-        const spec = Specialties[specialtyId];
-        if (!spec) return { success: false, msg: '特産品が見つかりません。' };
+    const spec = Specialties[specialtyId];
+    if (!spec) return { success: false, msg: '特産品が見つかりません。' };
 
-        if (Resources[spec.resource].type !== ResourceTypes.BASE) {
-            return { success: false, msg: '交易品の特産品には加工所を建設できません。' };
-        }
+    if (Resources[spec.resource].type !== ResourceTypes.BASE) {
+        return { success: false, msg: '交易品の特産品には加工所を建設できません。' };
+    }
 
-        if (!player.activeSpecialties.includes(specialtyId)) {
-            return { success: false, msg: '対象の特産品が稼働していません。' };
-        }
+    if (!player.activeSpecialties.includes(specialtyId)) {
+        return { success: false, msg: '対象の特産品が稼働していません。' };
+    }
 
-        player.processingPlants = player.processingPlants || [];
-        if (player.processingPlants.includes(spec.resource)) {
-            return { success: false, msg: '既にこの資源の加工所は建設済みです。' };
-        }
+    player.processingPlants = player.processingPlants || [];
+    if (player.processingPlants.includes(spec.resource)) {
+        return { success: false, msg: '既にこの資源の加工所は建設済みです。' };
+    }
 
+    if (!isFree) {
         const costResource = player.hand[handIndex];
         if (costResource !== spec.resource) {
             return { success: false, msg: `加工所の建設には対応する資源（${Resources[spec.resource].name}）が必要です。` };
         }
-
         player.hand.splice(handIndex, 1);
-        player.processingPlants.push(spec.resource);
+    }
 
-        logger.log(`${player.name} が ${spec.name} に加工所を建設しました！${isFree ? '（工房街整備効果：AP不要）' : ''}`);
+    player.processingPlants.push(spec.resource);
 
-        if (!isFree) game.useAction();
-        if (isFree) game.turnState.freeProcessingPlant = false;
+    logger.log(`${player.name} が ${spec.name} に加工所を建設しました！${isFree ? '（工房街整備効果：AP・資源コスト不要）' : ''}`);
+
+    if (!isFree) game.useAction();
+    if (isFree) {
+        game.turnState.freeProcessingPlant = false;
         game.notifyChange();
-    });
+    }
     return { success: true };
 };
 

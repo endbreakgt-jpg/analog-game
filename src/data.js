@@ -138,7 +138,7 @@ export const Demands = [
     { id: 'd_bonus5', name: '保存食納入', reqText: '魚+小麦 (魚加工+2)', req: { fish: 1, wheat: 1 }, points: 4, bonus: { targets: ['fish'], points: 2 } },
     { id: 'd_bonus6', name: '製粉供給', reqText: '小麦+任意の基本資源1 (小麦加工+2)', req: { wheat: 1, _anyBase: 1 }, points: 4, bonus: { targets: ['wheat'], points: 2 } },
     { id: 'd_bonus7', name: '石工装飾', reqText: '石材+宝石 (石材加工+2)', req: { stone: 1, gem: 1 }, points: 5, bonus: { targets: ['stone'], points: 2 } },
-    { id: 'd_bonus8', name: '造船材調達', reqText: '木材+羊毛+魚 (木材加工+1、効果:マーケット入れ替え)', req: { wood: 1, wool: 1, fish: 1 }, points: 4, bonus: { targets: ['wood'], points: 1 }, effect: 'market_replace_2' },
+    { id: 'd_bonus8', name: '造船材調達', reqText: '木材+羊毛+魚 (木材加工+1、効果:マーケット入れ替え+基本資源獲得)', req: { wood: 1, wool: 1, fish: 1 }, points: 4, bonus: { targets: ['wood'], points: 1 }, effect: 'market_replace_2' },
     { id: 'd_bonus9', name: '軍需補給', reqText: '鉄+小麦+魚 (鉄加工+2)', req: { iron: 1, wheat: 1, fish: 1 }, points: 6, bonus: { targets: ['iron'], points: 2 } },
     { id: 'd_bonus10', name: '都市食料流通', reqText: '小麦+魚+粘土 (小麦/魚加工+2)', req: { wheat: 1, fish: 1, clay: 1 }, points: 5, bonus: { targets: ['wheat', 'fish'], points: 2 } },
     // 高級需要 4枚

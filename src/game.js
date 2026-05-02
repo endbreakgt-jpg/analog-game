@@ -1,4 +1,4 @@
-import { createMarketDeck, createDemandDeck, createSpecialtyDeck } from './data.js';
+import { Resources, createMarketDeck, createDemandDeck, createSpecialtyDeck } from './data.js';
 import { logger } from './logger.js';
 
 export class GameState {
@@ -56,8 +56,7 @@ export class GameState {
                 processingPlants: [],
                 achievedDemands: [],
                 achievedRoles: [],
-                maxHandSize: 8,
-                bonusApNextTurn: false
+                maxHandSize: 8
             });
             playerId++;
         }
@@ -77,8 +76,7 @@ export class GameState {
                 processingPlants: [],
                 achievedDemands: [],
                 achievedRoles: [],
-                maxHandSize: 8,
-                bonusApNextTurn: false
+                maxHandSize: 8
             });
             playerId++;
         }
@@ -198,14 +196,7 @@ export class GameState {
         this.phase = 'playing';
         const p = this.getCurrentPlayer();
 
-        // bonusApNextTurnフラグが立っていれば+1AP
-        let baseAp = 2;
-        if (p.bonusApNextTurn) {
-            baseAp = 3;
-            p.bonusApNextTurn = false;
-            logger.log(`${p.name} の次ターン+1AP効果が発動しました。`);
-        }
-        this.actionsLeft = baseAp;
+        this.actionsLeft = 2;
 
         if (this.round <= this.maxRounds) {
             logger.log(`${p.name} のターンです。`);
@@ -275,8 +266,7 @@ export class GameState {
         this.completeHandExchange(playerId, discardIndices, resourceIds, 2, '国家備蓄');
     }
 
-    // 効果: 造船材調達 — マーケットを最大2枚入れ替える
-    completeMarketReplace(marketIndices) {
+    replaceMarketCards(marketIndices) {
         // 選択されたカードを捨て札へ
         [...marketIndices].sort((a, b) => b - a).forEach(i => {
             const card = this.marketCards[i];
@@ -292,6 +282,24 @@ export class GameState {
             }
         }
         logger.log(`造船材調達の効果でマーケットを ${marketIndices.length} 枚入れ替え、${replenished} 枚補充しました。`);
+    }
+
+    completeMarketReplace(marketIndices, gainMarketIndex = -1) {
+        this.replaceMarketCards(marketIndices);
+        this.completeMarketReplaceGain(this.getCurrentPlayer().id, gainMarketIndex);
+    }
+
+    completeMarketReplaceGain(playerId, gainMarketIndex = -1) {
+        const p = this.players.find(x => x.id === playerId);
+        const obtained = this.marketCards[gainMarketIndex];
+        if (p && obtained && Resources[obtained]?.type === 'base') {
+            this.marketCards[gainMarketIndex] = null;
+            this.marketDiscard.push(obtained);
+            p.hand.push(obtained);
+            import('./data.js').then(({ Resources }) => {
+                logger.log(`${p.name} が造船材調達の効果で ${Resources[obtained].name} を得ました。`);
+            });
+        }
         this.phase = 'playing';
         this.notifyChange();
     }

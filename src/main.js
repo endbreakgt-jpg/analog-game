@@ -163,9 +163,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 効果: 造船材調達 — マーケット入れ替え決定ボタン
         document.getElementById('btn-market-replace-confirm').addEventListener('click', () => {
+            if (ui._marketReplaceStep === 'gain') {
+                const gainIndex = ui._marketReplaceGainIndex ?? -1;
+                game.completeMarketReplaceGain(game.getCurrentPlayer().id, gainIndex);
+                ui._marketReplaceStep = null;
+                ui._marketReplaceGainIndex = -1;
+                return;
+            }
+
             const selected = ui._marketReplaceSelected || [];
-            game.completeMarketReplace(selected);
+            game.replaceMarketCards(selected);
+            ui._marketReplaceStep = 'gain';
             ui._marketReplaceSelected = [];
+            ui.renderMarketReplacePhase(game);
         });
 
         // 効果: 国家備蓄/住宅整備 — 手札交換決定ボタン
@@ -191,11 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 効果: 工房街整備 — 建設ボタン
         document.getElementById('btn-free-plant-confirm').addEventListener('click', () => {
             const specId = ui._freePlantSpecialty;
-            const handIdx = ui._freePlantHandIndex;
             if (!specId) return ui.showAlert('建設する特産品を選択してください。');
-            if (handIdx === -1) return ui.showAlert('支払う資源を手札から選択してください。');
             const player = game.getCurrentPlayer();
-            const res = Actions.executeBuildProcessingPlant(game, player, specId, handIdx, true);
+            const res = Actions.executeBuildProcessingPlant(game, player, specId, null, true);
             if (res.success) {
                 document.getElementById('free-plant-overlay').classList.add('hidden');
                 ui._freePlantSpecialty = null;

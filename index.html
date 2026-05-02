@@ -119,8 +119,8 @@
         style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1600; display:flex; justify-content:center; align-items:center;">
         <div
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
-            <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 造船材調達の効果</h2>
-            <p style="margin-bottom:8px;">マーケットのカードを<strong>最大2枚まで</strong>選んで入れ替えます（0枚でもOK）。</p>
+            <h2 id="market-replace-title" style="font-size:1.4rem; margin-bottom:8px;">📜 造船材調達の効果</h2>
+            <p id="market-replace-desc" style="margin-bottom:8px;">マーケットのカードを<strong>最大2枚まで</strong>選んで入れ替えます（0枚でもOK）。</p>
             <div id="market-replace-field-preview" class="popup-field-preview"></div>
             <div id="market-replace-cards" class="card-row"
                 style="justify-content:center; flex-wrap:wrap; margin:15px 0;"></div>
@@ -161,14 +161,14 @@
         <div
             style="background:var(--bg-parchment); padding:30px; border-radius:8px; border:3px solid var(--border-gold); text-align:center; color:var(--text-main); max-width:700px; width:95%;">
             <h2 style="font-size:1.4rem; margin-bottom:8px;">📜 工房街整備の効果</h2>
-            <p style="margin-bottom:6px;">加工所を建設する特産品と、支払う資源を選んでください。<strong>（AP不要・資源コストは通常通り）</strong></p>
+            <p style="margin-bottom:6px;">加工所を建設する特産品を選んでください。<strong>（AP・資源コスト不要）</strong></p>
             <div id="free-plant-field-preview" class="popup-field-preview"></div>
             <div style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap; margin:15px 0;">
                 <div>
                     <p style="font-size:0.9rem; margin-bottom:6px;">稼働中の基本特産品</p>
                     <div id="free-plant-specialties" class="card-row" style="justify-content:center;"></div>
                 </div>
-                <div>
+                <div id="free-plant-hand-section" style="display:none;">
                     <p style="font-size:0.9rem; margin-bottom:6px;">支払う資源 (手札から)</p>
                     <div id="free-plant-hand" class="card-row" style="justify-content:center;"></div>
                 </div>

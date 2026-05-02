@@ -154,18 +154,18 @@ function getBaseResourceNeedScores(game, player, hand = player.hand, excludedDem
     return scores;
 }
 
-function getBuildableProcessingResources(game, player, hand = player.hand) {
+function getBuildableProcessingResources(game, player, hand = player.hand, requireCost = true) {
     const processed = player.processingPlants || [];
     return player.activeSpecialties
         .map(sId => Specialties[sId])
         .filter(spec => spec && Resources[spec.resource].type === ResourceTypes.BASE)
         .filter(spec => !processed.includes(spec.resource))
-        .filter(spec => hand.includes(spec.resource))
+        .filter(spec => !requireCost || hand.includes(spec.resource))
         .map(spec => spec.resource);
 }
 
-function hasRelevantProcessingOpportunity(game, player, hand = player.hand, excludedDemandId = null) {
-    const buildableResources = getBuildableProcessingResources(game, player, hand);
+function hasRelevantProcessingOpportunity(game, player, hand = player.hand, excludedDemandId = null, requireCost = true) {
+    const buildableResources = getBuildableProcessingResources(game, player, hand, requireCost);
     if (buildableResources.length === 0) return false;
 
     const targets = [
@@ -195,7 +195,7 @@ function countLowValueMarketCards(game, excludedDemandId = null) {
 }
 
 const DEFAULT_UNKNOWN_EFFECT_VALUE = 0.75;
-const MAX_EFFECT_VALUE = 2;
+const MAX_EFFECT_VALUE = 4;
 
 // 新しい効果付き需要カードを追加した場合は、effect名ごとにここへ評価関数を足す。
 const DemandEffectEstimators = {
@@ -203,15 +203,13 @@ const DemandEffectEstimators = {
         const needScores = getBaseResourceNeedScores(game, player, remainingHand, demand.id);
         return Math.max(...Object.values(needScores), 0) > 0 ? 1 : 0.5;
     },
-    bonus_ap_next_turn: ({ game }) => {
-        if (game.round >= game.maxRounds) return 0;
-        if (game.round === game.maxRounds - 1) return 0.75;
-        return 1.5;
+    bonus_ap_next_turn: () => {
+        return 3;
     },
     free_processing_plant: ({ game, player, demand, remainingHand }) => {
-        const buildable = getBuildableProcessingResources(game, player, remainingHand);
+        const buildable = getBuildableProcessingResources(game, player, remainingHand, false);
         if (buildable.length === 0) return 0.2;
-        return hasRelevantProcessingOpportunity(game, player, remainingHand, demand.id) ? 2 : 1.5;
+        return hasRelevantProcessingOpportunity(game, player, remainingHand, demand.id, false) ? 3 : 2;
     },
     stockpile_exchange: ({ game, player, demand, remainingHand }) => {
         if (remainingHand.length === 0) return 0.2;
@@ -223,9 +221,9 @@ const DemandEffectEstimators = {
     },
     market_replace_2: ({ game, demand }) => {
         const lowValueCount = countLowValueMarketCards(game, demand.id);
-        if (lowValueCount >= 2) return 1;
-        if (lowValueCount === 1) return 0.75;
-        return 0.5;
+        if (lowValueCount >= 2) return 3;
+        if (lowValueCount === 1) return 2.5;
+        return game.marketCards.some(id => id && Resources[id].type === ResourceTypes.BASE) ? 2 : 1;
     },
     discounted_exchange: ({ game, player, remainingHand }) => {
         const simulatedPlayer = { ...player, hand: remainingHand };
@@ -456,7 +454,15 @@ export class CPU {
         // スコアが低い順に最大2枚を入れ替え
         marketScores.sort((a, b) => a.score - b.score);
         const replaceIndices = marketScores.slice(0, 2).filter(x => x.score < 1).map(x => x.i);
-        game.completeMarketReplace(replaceIndices);
+        game.replaceMarketCards(replaceIndices);
+
+        const scores = this.getBaseResourceNeedScores(game, player);
+        const gainCandidates = game.marketCards
+            .map((id, i) => ({ id, i, score: id && Resources[id].type === ResourceTypes.BASE ? (scores[id] || 0) : -1 }))
+            .filter(x => x.id && Resources[x.id].type === ResourceTypes.BASE)
+            .sort((a, b) => b.score - a.score);
+        const gainIndex = gainCandidates.length > 0 && gainCandidates[0].score > 0 ? gainCandidates[0].i : -1;
+        game.completeMarketReplaceGain(player.id, gainIndex);
         return true;
     }
 
@@ -519,9 +525,7 @@ export class CPU {
                 const spec = Specialties[sId];
                 if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
                 if (processed.includes(spec.resource)) continue;
-                const handIdx = player.hand.indexOf(spec.resource);
-                if (handIdx === -1) continue;
-                const res = Actions.executeBuildProcessingPlant(game, player, sId, handIdx, true);
+                const res = Actions.executeBuildProcessingPlant(game, player, sId, null, true);
                 if (res.success) return true;
             }
             game.turnState.freeProcessingPlant = false;
@@ -569,7 +573,15 @@ export class CPU {
         }
 
         // -------------------------------------------------
-        // 優先度2: 固定役の達成 (1ターンに1回まで)
+        // 優先度2: 追加需要達成 (2回目以降は1AP)
+        // -------------------------------------------------
+        const currentDemandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
+        if (currentDemandCount > 0 && game.actionsLeft > 0 && this.tryAchieveBestDemand(game, player)) {
+            return true;
+        }
+
+        // -------------------------------------------------
+        // 優先度3: 固定役の達成 (1ターンに1回まで)
         // -------------------------------------------------
         if (!game.turnState.roleAchieved) {
             const subsets = getAllSubsets(player.hand.map((_, i) => i));
@@ -594,15 +606,7 @@ export class CPU {
         }
 
         // -------------------------------------------------
-        // 優先度2.5: 追加需要達成 (2回目以降は1AP)
-        // -------------------------------------------------
-        const currentDemandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
-        if (currentDemandCount > 0 && game.actionsLeft > 0 && this.tryAchieveBestDemand(game, player)) {
-            return true;
-        }
-
-        // -------------------------------------------------
-        // 優先度3: 加工所の建設 (1AP)
+        // 優先度4: 加工所の建設 (1AP)
         // -------------------------------------------------
         if (game.actionsLeft > 0) {
             for (let i = 0; i < player.activeSpecialties.length; i++) {
@@ -631,7 +635,7 @@ export class CPU {
         }
 
         // -------------------------------------------------
-        // 優先度4: マーケット交換 (1AP) — 全候補列挙→評価→実行
+        // 優先度5: マーケット交換 (1AP) — 全候補列挙→評価→実行
         // -------------------------------------------------
         if (game.actionsLeft > 0) {
             const best = chooseCpuMarketTrade(game, player);
@@ -642,7 +646,7 @@ export class CPU {
         }
 
         // -------------------------------------------------
-        // 優先度5: ターン終了
+        // 優先度6: ターン終了
         // -------------------------------------------------
         game.endTurn();
         return true;

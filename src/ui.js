@@ -2,11 +2,11 @@ import { Resources, ResourceTypes, Specialties, Demands, FixedRoles, getDemandVa
 
 const EffectDescriptions = {
     'gain_base_resource': '効果：好きな基本資源1枚を得る',
-    'bonus_ap_next_turn': '効果：次の自分のターンに+1AP',
-    'free_processing_plant': '効果：APを使わず加工所を1回建設できる',
+    'bonus_ap_next_turn': '効果：このターン中AP+1',
+    'free_processing_plant': '効果：AP・資源コストなしで加工所を1回建設できる',
     'stockpile_exchange': '効果：手札を2枚まで捨て、同じ枚数だけ好きな基本資源を得る',
     'hand_exchange_1': '効果：手札を1枚まで捨て、同じ枚数だけ好きな基本資源を得る',
-    'market_replace_2': '効果：マーケットのカードを最大2枚まで入れ替える',
+    'market_replace_2': '効果：マーケットのカードを最大2枚まで入れ替え、基本資源1枚を得てもよい',
     'discounted_exchange': '効果：1回だけマーケットでの交換コストを1軽減する（最低コスト1枚）',
     'normal_market_exchange': '効果：APを使わず通常のマーケット交換を1回行える'
 };
@@ -966,15 +966,38 @@ export class UIManager {
         if (!overlay) return;
         overlay.classList.remove('hidden');
         this.renderPopupFieldPreview('market-replace-field-preview', game);
+        const isGainStep = this._marketReplaceStep === 'gain';
+        const titleEl = document.getElementById('market-replace-title');
+        const descEl = document.getElementById('market-replace-desc');
+        if (titleEl) titleEl.textContent = isGainStep ? '📜 造船材調達の効果：基本資源獲得' : '📜 造船材調達の効果';
+        if (descEl) {
+            descEl.innerHTML = isGainStep
+                ? '入れ替え後のマーケットから<strong>基本資源1枚</strong>を得てもよいです（選ばず決定でスキップ）。'
+                : 'マーケットのカードを<strong>最大2枚まで</strong>選んで入れ替えます（0枚でもOK）。';
+        }
 
         const container = document.getElementById('market-replace-cards');
         container.innerHTML = '';
-        this._marketReplaceSelected = [];
+        if (isGainStep) {
+            this._marketReplaceGainIndex = -1;
+        } else {
+            this._marketReplaceSelected = [];
+        }
 
         game.marketCards.forEach((resId, index) => {
             if (!resId) return;
             const res = Resources[resId];
             const card = this.createCardElement(res.name, res.type === 'base' ? '基本資源' : '交易品', res.icon, `resource ${res.type}`, (el) => {
+                if (isGainStep) {
+                    if (res.type !== ResourceTypes.BASE) return;
+                    Array.from(container.children).forEach(c => c.classList.remove('selected'));
+                    this._marketReplaceGainIndex = index;
+                    el.classList.add('selected');
+                    const countEl = document.getElementById('market-replace-count');
+                    if (countEl) countEl.textContent = '獲得: 1枚';
+                    return;
+                }
+
                 const idx = this._marketReplaceSelected.indexOf(index);
                 if (idx > -1) {
                     this._marketReplaceSelected.splice(idx, 1);
@@ -986,8 +1009,14 @@ export class UIManager {
                 const countEl = document.getElementById('market-replace-count');
                 if (countEl) countEl.textContent = `選択中: ${this._marketReplaceSelected.length} 枚`;
             });
+            if (isGainStep && res.type !== ResourceTypes.BASE) {
+                card.style.opacity = '0.45';
+            }
             container.appendChild(card);
         });
+
+        const countEl = document.getElementById('market-replace-count');
+        if (countEl) countEl.textContent = isGainStep ? '獲得: 0枚' : '選択中: 0 枚';
     }
 
     // 効果: 国家備蓄/住宅整備 — 手札を交換し、同数の基本資源を得る
@@ -1102,19 +1131,12 @@ export class UIManager {
             specCont.appendChild(card);
         });
 
-        // 手札の資源カード
+        const handSection = document.getElementById('free-plant-hand-section');
+        if (handSection) handSection.style.display = 'none';
+
+        // v0.2.2: 工房街整備では資源コストを支払わない
         const handCont = document.getElementById('free-plant-hand');
         handCont.innerHTML = '';
-        player.hand.forEach((resId, idx) => {
-            const r = Resources[resId];
-            if (r.type !== ResourceTypes.BASE) return;
-            const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), (el) => {
-                Array.from(handCont.children).forEach(c => c.classList.remove('selected'));
-                this._freePlantHandIndex = idx;
-                el.classList.add('selected');
-            });
-            handCont.appendChild(card);
-        });
     }
 
     // 効果: 大商館納品 — 割引交換モード開始（選択状態を割引モードとしてマーク）
