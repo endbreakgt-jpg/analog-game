@@ -135,6 +135,23 @@ h1, h2, h3, h4 {
     overflow-y: auto;
 }
 
+#setup-phase-overlay.initial-setup-screen {
+    background: var(--bg-dark) !important;
+    align-items: stretch !important;
+    padding: 28px;
+}
+
+#setup-phase-overlay.initial-setup-screen > div {
+    width: min(1100px, 100%) !important;
+    max-width: 1100px !important;
+    max-height: calc(100vh - 56px);
+    margin: auto;
+}
+
+#setup-phase-overlay.initial-setup-screen #setup-field-preview {
+    display: none;
+}
+
 .popup-field-preview {
     margin: 14px 0;
     text-align: left;

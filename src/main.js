@@ -148,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         errorMsg.textContent = '';
 
         document.getElementById('setup-overlay').style.display = 'none';
-        document.getElementById('game-container').style.display = 'flex';
+        document.getElementById('game-container').style.display = 'none';
 
         // ゲーム初期化
         game.init({ human: humanCount, cpu: cpuCount });

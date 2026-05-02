@@ -32,6 +32,9 @@ export class GameState {
         const totalPlayers = playerCounts.human + playerCounts.cpu;
         this.marketDeck = createMarketDeck();
         this.demandDeck = createDemandDeck();
+        this.marketCards = [];
+        this.marketDiscard = [];
+        this.demandCards = [];
 
         // プレイヤー初期化
         const specialtyDeck = createSpecialtyDeck();
@@ -80,15 +83,7 @@ export class GameState {
             playerId++;
         }
 
-        // マーケット初期化 (4枚)
-        for (let i = 0; i < 4; i++) {
-            this.marketCards.push(this.drawMarketCard());
-        }
-
-        // 需要カード初期化 (6枚に変更)
-        for (let i = 0; i < 6; i++) {
-            this.demandCards.push(this.demandDeck.pop());
-        }
+        // Board cards stay unrevealed until all players finish initial setup.
 
         this.currentPlayerIndex = 0;
         this.startPlayerIndex = 0;
@@ -99,6 +94,20 @@ export class GameState {
         this.notifyChange();
     }
 
+    revealInitialBoard() {
+        if (this.marketCards.length === 0) {
+            for (let i = 0; i < 4; i++) {
+                this.marketCards.push(this.drawMarketCard());
+            }
+        }
+
+        if (this.demandCards.length === 0) {
+            for (let i = 0; i < 6; i++) {
+                this.demandCards.push(this.demandDeck.pop());
+            }
+        }
+    }
+
     completeSetup(playerId, activeIndices) {
         const p = this.players.find(x => x.id === playerId);
         const actives = activeIndices.sort((a, b) => b - a).map(idx => p.inactiveSpecialties.splice(idx, 1)[0]);
@@ -106,6 +115,7 @@ export class GameState {
 
         this.setupPlayerIndex++;
         if (this.setupPlayerIndex >= this.players.length) {
+            this.revealInitialBoard();
             this.phase = 'playing';
             this.currentPlayerIndex = this.startPlayerIndex;
             this.actionsLeft = 2;

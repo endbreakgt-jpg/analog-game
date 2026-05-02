@@ -147,6 +147,11 @@ export class UIManager {
         const setupOverlay = document.getElementById('setup-phase-overlay');
         const discardOverlay = document.getElementById('discard-phase-overlay');
         const resultOverlay = document.getElementById('result-overlay');
+        const gameContainer = document.getElementById('game-container');
+
+        if (gameContainer) {
+            gameContainer.style.display = game.phase === 'setup' && !game.isGameOver ? 'none' : 'flex';
+        }
 
         if (game.isGameOver) {
             if (setupOverlay) setupOverlay.classList.add('hidden');
@@ -276,6 +281,10 @@ export class UIManager {
         const isSetup = game.phase === 'setup';
         const p = isSetup ? game.players[game.setupPlayerIndex] : game.players[game.devPlayerIndex];
         const maxSelect = isSetup ? 3 : 1;
+        const setupOverlay = document.getElementById('setup-phase-overlay');
+        const fieldPreview = document.getElementById('setup-field-preview');
+
+        if (setupOverlay) setupOverlay.classList.toggle('initial-setup-screen', isSetup);
 
         document.getElementById('setup-player-name').textContent = p.name;
         document.getElementById('setup-action-name').textContent = isSetup ? '初期配置' : '無料稼働 (第3ラウンド)';
@@ -283,7 +292,15 @@ export class UIManager {
             ? '初期特産品5枚のうち、最初から稼働させる3枚を選択してください。'
             : '未開発の特産品から、稼働させるものを1枚選択してください。';
 
-        this.renderPopupFieldPreview('setup-field-preview', game);
+        if (fieldPreview) {
+            if (isSetup) {
+                fieldPreview.classList.add('hidden');
+                fieldPreview.innerHTML = '';
+            } else {
+                fieldPreview.classList.remove('hidden');
+                this.renderPopupFieldPreview('setup-field-preview', game);
+            }
+        }
 
         const container = document.getElementById('setup-specialties');
         container.innerHTML = '';
