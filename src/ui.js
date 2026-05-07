@@ -26,6 +26,8 @@ export class UIManager {
         this.onRoleAchieve = null;
         this.onBuildProcessingPlant = null;
         this.onEndTurn = null;
+        this.onSetupConfirm = null;
+        this.onDiscardConfirm = null;
 
         this.gameRef = null;
     }
@@ -88,6 +90,11 @@ export class UIManager {
             const activeIndices = [...this.selectedInactiveSpecialtyIndex];
             this.selectedInactiveSpecialtyIndex = [];
 
+            if (this.onSetupConfirm) {
+                this.onSetupConfirm(activeIndices, game.phase);
+                return;
+            }
+
             if (game.phase === 'setup') {
                 const p = game.players[game.setupPlayerIndex];
                 game.completeSetup(p.id, activeIndices);
@@ -113,6 +120,12 @@ export class UIManager {
 
             const discardIndices = [...this.selectedDiscardIndices];
             this.selectedDiscardIndices = [];
+
+            if (this.onDiscardConfirm) {
+                this.onDiscardConfirm(discardIndices);
+                return;
+            }
+
             game.completeDiscard(p.id, discardIndices);
         });
 
@@ -139,6 +152,19 @@ export class UIManager {
         this.selectedInactiveSpecialtyIndex = Array.isArray(this.selectedInactiveSpecialtyIndex) ? [] : -1;
         this.selectedActiveSpecialtyIndex = -1;
         this.selectedDiscardIndices = [];
+    }
+
+    canControlPlayer(game, player) {
+        return player.id === game.currentPlayerIndex
+            && (game.localPlayerId === undefined || game.localPlayerId === null || player.id === game.localPlayerId);
+    }
+
+    isLocalFocusPlayer(game, player) {
+        return game.localPlayerId === undefined || game.localPlayerId === null || player.id === game.localPlayerId;
+    }
+
+    createHiddenCardElement(label = 'Hidden') {
+        return this.createCardElement(label, '', '?', 'hidden-card', null);
     }
 
     renderAll(game) {
@@ -304,6 +330,11 @@ export class UIManager {
 
         const container = document.getElementById('setup-specialties');
         container.innerHTML = '';
+
+        if (!this.isLocalFocusPlayer(game, p)) {
+            container.innerHTML = `<div style="padding:20px; font-weight:bold;">Waiting for ${this.escapeHtml(p.name)}...</div>`;
+            return;
+        }
 
         p.inactiveSpecialties.forEach((sId, idx) => {
             const s = Specialties[sId];
@@ -653,6 +684,10 @@ export class UIManager {
         const handContainer = document.getElementById('discard-hand-cards');
         if (handContainer) {
             handContainer.innerHTML = '';
+            if (!this.isLocalFocusPlayer(game, p)) {
+                handContainer.innerHTML = `<div style="padding:20px; font-weight:bold;">Waiting for ${this.escapeHtml(p.name)}...</div>`;
+                return;
+            }
             p.hand.forEach((resId, idx) => {
                 const r = Resources[resId];
                 const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, p), r.icon, this.getHandResourceCardClass(resId, p), (el) => {
@@ -758,10 +793,10 @@ export class UIManager {
             const activeCont = board.querySelector('.active-specialties');
             player.activeSpecialties.forEach((sId, idx) => {
                 const s = Specialties[sId];
-                const isCurrentPlayer = player.id === game.currentPlayerIndex;
+                const canControl = this.canControlPlayer(game, player);
                 const hasPlant = player.processingPlants && player.processingPlants.includes(s.resource);
                 const overlay = hasPlant ? '🏭' : null;
-                const card = this.createCardElement(s.name, s.resource, s.icon, `specialty ${Resources[s.resource].type}`, isCurrentPlayer ? (el) => {
+                const card = this.createCardElement(s.name, s.resource, s.icon, `specialty ${Resources[s.resource].type}`, canControl ? (el) => {
                     if (this.selectedActiveSpecialtyIndex === idx) {
                         this.selectedActiveSpecialtyIndex = -1;
                         el.classList.remove('selected');
@@ -771,7 +806,7 @@ export class UIManager {
                         el.classList.add('selected');
                     }
                 } : null, overlay);
-                if (isCurrentPlayer && this.selectedActiveSpecialtyIndex === idx) card.classList.add('selected');
+                if (canControl && this.selectedActiveSpecialtyIndex === idx) card.classList.add('selected');
                 activeCont.appendChild(card);
             });
 
@@ -779,8 +814,12 @@ export class UIManager {
             const inactiveCont = board.querySelector('.inactive-specialties');
             player.inactiveSpecialties.forEach((sId, idx) => {
                 const s = Specialties[sId];
-                const isCurrentPlayer = player.id === game.currentPlayerIndex;
-                const card = this.createCardElement(s.name, s.resource, s.icon, `specialty inactive ${Resources[s.resource].type}`, isCurrentPlayer ? (el) => {
+                if (!s) {
+                    inactiveCont.appendChild(this.createHiddenCardElement('Hidden'));
+                    return;
+                }
+                const canControl = this.canControlPlayer(game, player);
+                const card = this.createCardElement(s.name, s.resource, s.icon, `specialty inactive ${Resources[s.resource].type}`, canControl ? (el) => {
                     // setup phase may have changed it to array, reset to number for normal phase
                     if (Array.isArray(this.selectedInactiveSpecialtyIndex)) {
                         this.selectedInactiveSpecialtyIndex = -1;
@@ -795,7 +834,7 @@ export class UIManager {
                     }
                 } : null);
 
-                if (isCurrentPlayer && this.selectedInactiveSpecialtyIndex === idx) card.classList.add('selected');
+                if (canControl && this.selectedInactiveSpecialtyIndex === idx) card.classList.add('selected');
                 inactiveCont.appendChild(card);
             });
 
@@ -803,8 +842,12 @@ export class UIManager {
             const handCont = board.querySelector('.hand-cards');
             player.hand.forEach((resId, idx) => {
                 const r = Resources[resId];
-                const isCurrentPlayer = player.id === game.currentPlayerIndex;
-                const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), isCurrentPlayer ? (el) => {
+                if (!r) {
+                    handCont.appendChild(this.createHiddenCardElement('Hidden'));
+                    return;
+                }
+                const canControl = this.canControlPlayer(game, player);
+                const card = this.createCardElement(r.name, this.getHandResourceTypeText(resId, player), r.icon, this.getHandResourceCardClass(resId, player), canControl ? (el) => {
                     const selectedIdx = this.selectedHandIndices.indexOf(idx);
                     if (selectedIdx > -1) {
                         this.selectedHandIndices.splice(selectedIdx, 1);
@@ -815,7 +858,7 @@ export class UIManager {
                     }
                 } : null);
 
-                if (isCurrentPlayer && this.selectedHandIndices.includes(idx)) {
+                if (canControl && this.selectedHandIndices.includes(idx)) {
                     card.classList.add('selected');
                 }
 
@@ -827,7 +870,7 @@ export class UIManager {
             // 獲得済み
             const demandsCont = board.querySelector('.achieved-demands');
             demandsCont.innerHTML = '';
-            const isCurrentPlayer = player.id === game.currentPlayerIndex;
+            const canUseEffects = this.canControlPlayer(game, player);
             player.achievedDemands.forEach(record => {
                 const demandId = typeof record === 'string' ? record : record.demandId;
                 const d = Demands.find(x => x.id === demandId);
@@ -843,7 +886,7 @@ export class UIManager {
                 row.innerHTML = `<span>📜 ${d.name}${variantLabel} (${totalPoints}点)</span>`;
 
                 // 効果ボタン
-                if (isCurrentPlayer && d.effect === 'free_processing_plant' && game.turnState?.freeProcessingPlant) {
+                if (canUseEffects && d.effect === 'free_processing_plant' && game.turnState?.freeProcessingPlant) {
                     const btn = document.createElement('button');
                     btn.textContent = '使用する';
                     btn.className = 'btn action-btn';
@@ -852,7 +895,7 @@ export class UIManager {
                     btn.addEventListener('click', () => this.showFreePlantOverlay(game));
                     row.appendChild(btn);
                 }
-                if (isCurrentPlayer && d.effect === 'discounted_exchange' && game.turnState?.discountedExchange) {
+                if (canUseEffects && d.effect === 'discounted_exchange' && game.turnState?.discountedExchange) {
                     const btn = document.createElement('button');
                     btn.textContent = '使用する';
                     btn.className = 'btn action-btn';
@@ -861,7 +904,7 @@ export class UIManager {
                     btn.addEventListener('click', () => this.startDiscountedExchangeMode(game));
                     row.appendChild(btn);
                 }
-                if (isCurrentPlayer && d.effect === 'normal_market_exchange' && game.turnState?.freeMarketExchange) {
+                if (canUseEffects && d.effect === 'normal_market_exchange' && game.turnState?.freeMarketExchange) {
                     const btn = document.createElement('button');
                     btn.textContent = '使用する';
                     btn.className = 'btn action-btn';
@@ -949,6 +992,11 @@ export class UIManager {
         const container = document.getElementById('gain-resource-cards');
         container.innerHTML = '';
         this._gainResourceSelected = null;
+        const player = game.getCurrentPlayer();
+        if (!this.isLocalFocusPlayer(game, player)) {
+            container.innerHTML = `<div style="padding:20px; font-weight:bold;">Waiting for ${this.escapeHtml(player.name)}...</div>`;
+            return;
+        }
 
         Object.values(Resources).filter(r => r.type === ResourceTypes.BASE).forEach(r => {
             const card = this.createCardElement(r.name, '基本資源', r.icon, `resource base`, (el) => {
@@ -966,7 +1014,8 @@ export class UIManager {
         if (!overlay) return;
         overlay.classList.remove('hidden');
         this.renderPopupFieldPreview('market-replace-field-preview', game);
-        const isGainStep = this._marketReplaceStep === 'gain';
+        const player = game.getCurrentPlayer();
+        const isGainStep = this._marketReplaceStep === 'gain' || game.marketReplaceStep === 'gain';
         const titleEl = document.getElementById('market-replace-title');
         const descEl = document.getElementById('market-replace-desc');
         if (titleEl) titleEl.textContent = isGainStep ? '📜 造船材調達の効果：基本資源獲得' : '📜 造船材調達の効果';
@@ -978,6 +1027,10 @@ export class UIManager {
 
         const container = document.getElementById('market-replace-cards');
         container.innerHTML = '';
+        if (!this.isLocalFocusPlayer(game, player)) {
+            container.innerHTML = `<div style="padding:20px; font-weight:bold;">Waiting for ${this.escapeHtml(player.name)}...</div>`;
+            return;
+        }
         if (isGainStep) {
             this._marketReplaceGainIndex = -1;
         } else {
@@ -1039,6 +1092,13 @@ export class UIManager {
         if (descEl) descEl.textContent = description;
         this.renderPopupFieldPreview('stockpile-field-preview', game);
         if (!handContainer || !gainContainer || !countEl) return;
+
+        if (!this.isLocalFocusPlayer(game, player)) {
+            handContainer.innerHTML = `<div style="padding:20px; font-weight:bold;">Waiting for ${this.escapeHtml(player.name)}...</div>`;
+            gainContainer.innerHTML = '';
+            countEl.textContent = '';
+            return;
+        }
 
         const updateCount = () => {
             const discardCount = this._stockpileDiscardSelected.length;

@@ -750,6 +750,13 @@ h1, h2, h3, h4 {
     z-index: 10;
 }
 
+.card.hidden-card {
+    background: #2f3542;
+    color: #f1f2f6;
+    border-color: #747d8c;
+    cursor: default;
+}
+
 /* Setup Modal Options */
 .setup-options {
     display: flex;
