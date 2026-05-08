@@ -1,17 +1,24 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { GameState } from './src/game.js';
 import * as Actions from './src/actions.js';
-import { CPU } from './src/cpu.js';
+import { CPU, CPU_PROFILES } from './src/cpu.js';
 import { logger } from './src/logger.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const LOG_DIR = path.join(ROOT, 'logs');
 const HIDDEN_RESOURCE = '__hidden_resource__';
 const HIDDEN_SPECIALTY = '__hidden_specialty__';
+const CORS_HEADERS = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type'
+};
 
 const clients = new Map();
 const streams = new Map();
@@ -31,9 +38,121 @@ function json(res, status, body) {
     const content = JSON.stringify(body);
     res.writeHead(status, {
         'content-type': 'application/json; charset=utf-8',
-        'content-length': Buffer.byteLength(content)
+        'content-length': Buffer.byteLength(content),
+        ...CORS_HEADERS
     });
     res.end(content);
+}
+
+function formatTimestampForFile(date = new Date()) {
+    const pad = value => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+    ].join('') + '-' + [
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds())
+    ].join('');
+}
+
+function publicPath(relativePath) {
+    return `/${relativePath.replaceAll(path.sep, '/')}`;
+}
+
+function logFileResponse(relativePath) {
+    return {
+        path: relativePath,
+        url: publicPath(relativePath)
+    };
+}
+
+function clampInt(value, min, max, fallback) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeLogInput(input) {
+    const raw = String(input || '').trim();
+    if (!raw) throw new Error('Log input path is required.');
+
+    const relative = raw
+        .replace(/^\/+/, '')
+        .replaceAll('/', path.sep);
+    const resolved = path.resolve(ROOT, relative);
+    const logRootWithSep = path.resolve(LOG_DIR) + path.sep;
+    if (!resolved.startsWith(logRootWithSep)) {
+        throw new Error('Only files under logs/ can be analyzed.');
+    }
+    if (path.extname(resolved).toLowerCase() !== '.jsonl') {
+        throw new Error('Only JSONL simulation logs can be analyzed.');
+    }
+
+    return path.relative(ROOT, resolved);
+}
+
+function runNodeScript(scriptRelativePath, args) {
+    return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
+        const child = spawn(process.execPath, [scriptRelativePath, ...args], {
+            cwd: ROOT,
+            windowsHide: true
+        });
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', chunk => {
+            stdout += chunk.toString();
+            if (stdout.length > 2_000_000) stdout = stdout.slice(-2_000_000);
+        });
+        child.stderr.on('data', chunk => {
+            stderr += chunk.toString();
+            if (stderr.length > 2_000_000) stderr = stderr.slice(-2_000_000);
+        });
+        child.on('error', reject);
+        child.on('close', code => {
+            const durationMs = Date.now() - startedAt;
+            if (code !== 0) {
+                const error = new Error(stderr || stdout || `Command failed with exit code ${code}.`);
+                error.stdout = stdout;
+                error.stderr = stderr;
+                error.code = code;
+                reject(error);
+                return;
+            }
+            resolve({ stdout, stderr, durationMs });
+        });
+    });
+}
+
+async function listSimulationLogs() {
+    let entries = [];
+    try {
+        entries = await readdir(LOG_DIR, { withFileTypes: true });
+    } catch {
+        return [];
+    }
+
+    const files = await Promise.all(entries
+        .filter(entry => entry.isFile())
+        .filter(entry => ['.jsonl', '.json', '.txt'].includes(path.extname(entry.name).toLowerCase()))
+        .map(async entry => {
+            const absolute = path.join(LOG_DIR, entry.name);
+            const info = await stat(absolute);
+            const relativePath = path.relative(ROOT, absolute);
+            return {
+                name: entry.name,
+                path: relativePath,
+                url: publicPath(relativePath),
+                ext: path.extname(entry.name).toLowerCase(),
+                size: info.size,
+                modifiedAt: info.mtime.toISOString()
+            };
+        }));
+
+    return files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
 function getClient(clientId) {
@@ -324,8 +443,123 @@ function sendEvents(req, res, url) {
     });
 }
 
+async function runSimulationFromRequest(body) {
+    const timestamp = formatTimestampForFile();
+    const games = clampInt(body.games, 1, 10000, 10);
+    const players = clampInt(body.players, 2, 5, 5);
+    const maxSteps = clampInt(body.maxSteps, 100, 100000, 5000);
+    const profiles = String(body.profiles || 'mixed').trim() || 'mixed';
+    const seed = String(body.seed || `gui-${timestamp}`).trim() || `gui-${timestamp}`;
+    const analyze = Boolean(body.analyze);
+
+    const simulationFiles = {
+        out: logFileResponse(path.join('logs', `cpu-gui-${timestamp}.jsonl`)),
+        summary: logFileResponse(path.join('logs', `cpu-gui-${timestamp}-summary.json`)),
+        report: logFileResponse(path.join('logs', `cpu-gui-${timestamp}.txt`))
+    };
+
+    const simulateArgs = [
+        '--games', String(games),
+        '--players', String(players),
+        '--profiles', profiles,
+        '--seed', seed,
+        '--max-steps', String(maxSteps),
+        '--timestamp', timestamp,
+        '--out', simulationFiles.out.path,
+        '--summary', simulationFiles.summary.path,
+        '--report', simulationFiles.report.path
+    ];
+    const simulation = await runNodeScript('scripts/simulate-cpu.mjs', simulateArgs);
+
+    let analysis = null;
+    if (analyze) {
+        const analysisFiles = {
+            summary: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}-summary.json`)),
+            report: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}.txt`))
+        };
+        const analyzeResult = await runNodeScript('scripts/analyze-cpu-logs.mjs', [
+            '--in', simulationFiles.out.path,
+            '--timestamp', timestamp,
+            '--summary', analysisFiles.summary.path,
+            '--report', analysisFiles.report.path
+        ]);
+        analysis = {
+            files: analysisFiles,
+            stdout: analyzeResult.stdout,
+            stderr: analyzeResult.stderr,
+            durationMs: analyzeResult.durationMs
+        };
+    }
+
+    return {
+        timestamp,
+        parameters: { games, players, profiles, seed, maxSteps, analyze },
+        simulation: {
+            files: simulationFiles,
+            stdout: simulation.stdout,
+            stderr: simulation.stderr,
+            durationMs: simulation.durationMs
+        },
+        analysis
+    };
+}
+
+async function runAnalysisFromRequest(body) {
+    const timestamp = formatTimestampForFile();
+    const rawInputs = Array.isArray(body.inputs)
+        ? body.inputs
+        : String(body.in || body.input || '').split(',');
+    const inputs = rawInputs.map(normalizeLogInput);
+    if (inputs.length === 0) throw new Error('Select at least one JSONL log.');
+
+    const analysisFiles = {
+        summary: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}-summary.json`)),
+        report: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}.txt`))
+    };
+    const result = await runNodeScript('scripts/analyze-cpu-logs.mjs', [
+        '--in', inputs.join(','),
+        '--timestamp', timestamp,
+        '--summary', analysisFiles.summary.path,
+        '--report', analysisFiles.report.path
+    ]);
+
+    return {
+        timestamp,
+        inputs,
+        files: analysisFiles,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        durationMs: result.durationMs
+    };
+}
+
 async function serveApi(req, res, url) {
     try {
+        if (req.method === 'GET' && url.pathname === '/api/simulation/profiles') {
+            return json(res, 200, {
+                ok: true,
+                profiles: Object.values(CPU_PROFILES).map(profile => ({
+                    id: profile.id,
+                    name: profile.name,
+                    turnPriority: profile.turnPriority
+                }))
+            });
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/simulation/logs') {
+            return json(res, 200, { ok: true, files: await listSimulationLogs() });
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/simulation/run') {
+            const body = await readJson(req);
+            return json(res, 200, { ok: true, ...(await runSimulationFromRequest(body)) });
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/simulation/analyze') {
+            const body = await readJson(req);
+            return json(res, 200, { ok: true, analysis: await runAnalysisFromRequest(body) });
+        }
+
         if (req.method === 'GET' && url.pathname === '/api/mode') {
             return json(res, 200, { ok: true, mode: 'online' });
         }
@@ -379,6 +613,7 @@ const MIME = {
     '.js': 'text/javascript; charset=utf-8',
     '.mjs': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.jsonl': 'application/x-ndjson; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8'
 };
 
@@ -405,6 +640,11 @@ async function serveStatic(res, pathname) {
 
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+    }
     if (url.pathname.startsWith('/api/') || url.pathname === '/events') {
         await serveApi(req, res, url);
         return;

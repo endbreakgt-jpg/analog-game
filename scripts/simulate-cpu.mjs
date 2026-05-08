@@ -11,11 +11,31 @@ const DEFAULT_OPTIONS = {
     players: 5,
     seed: '1',
     profiles: DEFAULT_CPU_PROFILE_ID,
-    out: 'logs/cpu-sim.jsonl',
-    summary: 'logs/cpu-sim-summary.json',
-    report: 'logs/cpu-sim-report.txt',
+    timestamp: null,
+    out: null,
+    summary: null,
+    report: null,
     maxSteps: 5000
 };
+
+function formatTimestampForFile(date = new Date()) {
+    const pad = value => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+    ].join('') + '-' + [
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds())
+    ].join('');
+}
+
+function sanitizeTimestamp(value) {
+    return String(value || '')
+        .replace(/[^0-9A-Za-z_-]/g, '')
+        .slice(0, 40);
+}
 
 function parseArgs(argv) {
     const options = { ...DEFAULT_OPTIONS };
@@ -31,7 +51,7 @@ function parseArgs(argv) {
 
         if (['games', 'players', 'max-steps'].includes(key)) {
             options[key === 'max-steps' ? 'maxSteps' : key] = Number(value);
-        } else if (['seed', 'profiles', 'out', 'summary', 'report'].includes(key)) {
+        } else if (['seed', 'profiles', 'timestamp', 'out', 'summary', 'report'].includes(key)) {
             options[key] = value;
         } else {
             throw new Error(`Unknown option --${key}`);
@@ -47,6 +67,11 @@ function parseArgs(argv) {
     if (!Number.isInteger(options.maxSteps) || options.maxSteps < 1) {
         throw new Error('--max-steps must be a positive integer.');
     }
+    options.timestamp = sanitizeTimestamp(options.timestamp) || formatTimestampForFile();
+    options.generatedAt = new Date().toISOString();
+    options.out ||= `logs/cpu-sim-${options.timestamp}.jsonl`;
+    options.summary ||= `logs/cpu-sim-${options.timestamp}-summary.json`;
+    options.report ||= `logs/cpu-sim-${options.timestamp}.txt`;
     options.profileIds = parseProfileIds(options.profiles, options.players);
 
     return options;
@@ -97,6 +122,8 @@ function makePlayerResult(player) {
 function makeLogEntry(entry, index) {
     return {
         index,
+        timestamp: entry.timestamp || null,
+        time: entry.time || null,
         message: entry.message,
         data: entry.data ?? null
     };
@@ -150,6 +177,7 @@ function runGame({ gameIndex, players, seed, maxSteps, profileIds }) {
 
     return {
         type: 'game_result',
+        generatedAt: new Date().toISOString(),
         gameIndex,
         seed: gameSeed,
         playerCount: players,
@@ -168,6 +196,8 @@ function addCount(map, key, amount = 1) {
 function summarize(results, options) {
     const summary = {
         games: results.length,
+        generatedAt: options.generatedAt,
+        timestamp: options.timestamp,
         players: options.players,
         seed: String(options.seed),
         profiles: [...options.profileIds],
@@ -431,6 +461,8 @@ function createAnnotatedReport(results, summary, options) {
     lines.push('');
     lines.push('Run Summary');
     lines.push('-----------');
+    lines.push(`Generated at: ${summary.generatedAt}`);
+    lines.push(`Run timestamp: ${summary.timestamp}`);
     lines.push(`Games: ${summary.games}`);
     lines.push(`Players: ${summary.players}`);
     lines.push(`Seed: ${summary.seed}`);

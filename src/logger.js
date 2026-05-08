@@ -6,8 +6,10 @@ export class GameLogger {
     }
 
     log(message, data = null) {
+        const now = new Date();
         const entry = {
-            time: new Date().toLocaleTimeString(),
+            timestamp: now.toISOString(),
+            time: now.toLocaleTimeString(),
             message,
             data
         };

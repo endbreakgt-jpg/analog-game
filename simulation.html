@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Simulation Console</title>
+    <link rel="stylesheet" href="simulation.css">
+</head>
+
+<body>
+    <header class="app-header">
+        <div>
+            <h1>CPU Simulation Console</h1>
+            <div id="status-line" class="status-line">待機中</div>
+        </div>
+        <nav class="header-actions">
+            <a class="button secondary" href="index.html">ゲーム画面</a>
+            <button id="btn-refresh" class="button secondary" type="button">更新</button>
+        </nav>
+    </header>
+
+    <main class="workspace">
+        <section class="panel run-panel">
+            <div class="panel-header">
+                <h2>実行条件</h2>
+            </div>
+            <form id="run-form" class="run-form">
+                <label>
+                    <span>試合数</span>
+                    <input id="input-games" type="number" min="1" max="10000" value="20">
+                </label>
+                <label>
+                    <span>CPU人数</span>
+                    <input id="input-players" type="number" min="2" max="5" value="5">
+                </label>
+                <label>
+                    <span>最大ステップ</span>
+                    <input id="input-max-steps" type="number" min="100" max="100000" value="5000">
+                </label>
+                <label>
+                    <span>シード</span>
+                    <input id="input-seed" type="text" placeholder="未入力なら自動">
+                </label>
+                <label>
+                    <span>プロファイル</span>
+                    <select id="select-profiles">
+                        <option value="mixed">mixed</option>
+                    </select>
+                </label>
+                <label id="custom-profile-label" class="is-hidden">
+                    <span>プロファイル列</span>
+                    <input id="input-custom-profiles" type="text" value="balanced,demand,role,engine,trader">
+                </label>
+                <label class="check-field">
+                    <input id="input-run-analysis" type="checkbox" checked>
+                    <span>分析も実行</span>
+                </label>
+                <button id="btn-run" class="button primary" type="submit">シミュレーション実行</button>
+            </form>
+        </section>
+
+        <section class="panel result-panel">
+            <div class="panel-header">
+                <h2>直近の結果</h2>
+            </div>
+            <div id="result-links" class="result-links">
+                <div class="empty-state">まだ実行結果はありません。</div>
+            </div>
+            <pre id="command-output" class="command-output"></pre>
+        </section>
+
+        <section class="panel logs-panel">
+            <div class="panel-header">
+                <h2>ログ一覧</h2>
+                <button id="btn-analyze-selected" class="button secondary" type="button">選択ログを分析</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="select-col"></th>
+                            <th>ファイル</th>
+                            <th>種類</th>
+                            <th>サイズ</th>
+                            <th>更新日時</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-body">
+                        <tr>
+                            <td colspan="6" class="empty-cell">読み込み中</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="src/simulation-gui.js"></script>
+</body>
+
+</html>

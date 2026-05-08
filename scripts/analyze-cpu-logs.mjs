@@ -5,9 +5,29 @@ import { Demands, FixedRoles, Resources, Specialties } from '../src/data.js';
 
 const DEFAULT_OPTIONS = {
     in: 'logs/cpu-sim.jsonl',
-    summary: 'logs/cpu-analysis-summary.json',
-    report: 'logs/cpu-analysis-report.txt'
+    timestamp: null,
+    summary: null,
+    report: null
 };
+
+function formatTimestampForFile(date = new Date()) {
+    const pad = value => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+    ].join('') + '-' + [
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds())
+    ].join('');
+}
+
+function sanitizeTimestamp(value) {
+    return String(value || '')
+        .replace(/[^0-9A-Za-z_-]/g, '')
+        .slice(0, 40);
+}
 
 const demandById = Object.fromEntries(Demands.map(demand => [demand.id, demand]));
 const roleById = Object.fromEntries(FixedRoles.map(role => [role.id, role]));
@@ -26,7 +46,7 @@ function parseArgs(argv) {
         }
         i++;
 
-        if (['in', 'summary', 'report'].includes(key)) {
+        if (['in', 'timestamp', 'summary', 'report'].includes(key)) {
             options[key] = value;
         } else {
             throw new Error(`Unknown option --${key}`);
@@ -41,6 +61,10 @@ function parseArgs(argv) {
     if (options.inputs.length === 0) {
         throw new Error('--in must include at least one JSONL path.');
     }
+    options.timestamp = sanitizeTimestamp(options.timestamp) || formatTimestampForFile();
+    options.generatedAt = new Date().toISOString();
+    options.summary ||= `logs/cpu-analysis-${options.timestamp}-summary.json`;
+    options.report ||= `logs/cpu-analysis-${options.timestamp}.txt`;
 
     return options;
 }
@@ -113,6 +137,8 @@ async function readResults(inputs) {
 function analyze(results, options) {
     const summary = {
         sources: options.inputs,
+        generatedAt: options.generatedAt,
+        timestamp: options.timestamp,
         games: results.length,
         playerEntries: 0,
         averageScore: 0,
@@ -282,6 +308,8 @@ function createReport(summary, options) {
     lines.push('');
     lines.push('Run Summary');
     lines.push('-----------');
+    lines.push(`Generated at: ${summary.generatedAt}`);
+    lines.push(`Run timestamp: ${summary.timestamp}`);
     lines.push(`Sources: ${options.inputs.join(', ')}`);
     lines.push(`Games: ${summary.games}`);
     lines.push(`Player entries: ${summary.playerEntries}`);

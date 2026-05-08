@@ -11,6 +11,7 @@ CPU-only matches should run without the browser so balance tuning can be based o
 3. Export machine-readable match logs.
 4. Export an annotated human-readable integrated text report.
 5. Keep the existing browser and online play behavior working.
+6. Provide a browser GUI for running CPU simulations and reviewing generated logs.
 
 ## Implementation Steps
 
@@ -21,6 +22,8 @@ CPU-only matches should run without the browser so balance tuning can be based o
 - The first CPU quality pass is implemented: setup, free development, discard, market exchange, and effect choices now record CPU decision metadata.
 - CPU profiles are implemented and can be selected from the simulator.
 - Card/effect aggregate analysis is implemented as a separate script.
+- The simulation GUI is implemented at `simulation.html`.
+- Generated simulation and analysis logs now include timestamped filenames and metadata.
 - Remaining tuning work is to run larger samples and adjust profile/card weights from the analysis output.
 
 ### 1. Reproducible Randomness
@@ -49,6 +52,7 @@ CPU-only matches should run without the browser so balance tuning can be based o
   - `--profiles <id[,id...]|mixed>`
 - Write JSONL logs for each game and a compact JSON summary.
 - Write an integrated text report with item-level log notes.
+- Default output names include a timestamp when explicit output paths are not provided.
 
 ### 4. Annotated Report
 
@@ -102,3 +106,21 @@ CPU-only matches should run without the browser so balance tuning can be based o
   - fixed role win rate and average score
   - processing plant and active specialty result trends
   - CPU decision counts by profile
+
+### 9. Simulation GUI
+
+- Add `simulation.html`, `simulation.css`, and `src/simulation-gui.js`.
+- Add server endpoints under `/api/simulation/*`:
+  - `GET /api/simulation/profiles`
+  - `GET /api/simulation/logs`
+  - `POST /api/simulation/run`
+  - `POST /api/simulation/analyze`
+- The GUI can:
+  - run CPU simulations with selected game count, player count, seed, max steps, and profiles
+  - optionally run analysis immediately after simulation
+  - list generated log files
+  - run analysis again from selected JSONL logs
+- Timestamp policy:
+  - generated filenames use `YYYYMMDD-HHMMSS`
+  - summary/report metadata includes `generatedAt` and `timestamp`
+  - individual JSONL log entries include ISO `timestamp` and local `time`
