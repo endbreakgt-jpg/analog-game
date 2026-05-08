@@ -1,10 +1,12 @@
 {
-  "name": "analog-game-online",
+  "name": "analog_game_online",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "simulate": "node scripts/simulate-cpu.mjs",
+    "analyze": "node scripts/analyze-cpu-logs.mjs"
   },
   "dependencies": {}
 }

@@ -1,8 +1,10 @@
-import { Resources, createMarketDeck, createDemandDeck, createSpecialtyDeck } from './data.js';
+import { Resources, Demands, FixedRoles, Specialties, createMarketDeck, createDemandDeck, createSpecialtyDeck } from './data.js';
 import { logger } from './logger.js';
+import { shuffle } from './random.js';
 
 export class GameState {
-    constructor() {
+    constructor(options = {}) {
+        this.random = options.random || Math.random;
         this.round = 1;
         this.maxRounds = 6;
         this.players = [];
@@ -30,14 +32,14 @@ export class GameState {
     init(playerCounts) {
         this.round = 1;
         const totalPlayers = playerCounts.human + playerCounts.cpu;
-        this.marketDeck = createMarketDeck();
-        this.demandDeck = createDemandDeck();
+        this.marketDeck = createMarketDeck(this.random);
+        this.demandDeck = createDemandDeck(this.random);
         this.marketCards = [];
         this.marketDiscard = [];
         this.demandCards = [];
 
         // プレイヤー初期化
-        const specialtyDeck = createSpecialtyDeck();
+        const specialtyDeck = createSpecialtyDeck(this.random);
         this.players = [];
         let playerId = 0;
 
@@ -117,11 +119,9 @@ export class GameState {
             this.phase = 'playing';
             this.currentPlayerIndex = this.startPlayerIndex;
             this.actionsLeft = 2;
-            import('./logger.js').then(({ logger }) => {
-                logger.log('--- 全プレイヤーの初期配置完了、ゲーム本編開始 ---');
-                this.logRoundStart();
-                this.produceResources();
-            });
+            logger.log('--- 全プレイヤーの初期配置完了、ゲーム本編開始 ---');
+            this.logRoundStart();
+            this.produceResources();
         } else {
             this.notifyChange();
         }
@@ -136,11 +136,9 @@ export class GameState {
         if (this.devPlayerIndex === this.startPlayerIndex) {
             this.phase = 'playing';
             this.actionsLeft = 2;
-            import('./logger.js').then(({ logger }) => {
-                logger.log('--- 全プレイヤーの第3ラウンド特産品稼働完了 ---');
-                this.logRoundStart();
-                this.produceResources();
-            });
+            logger.log('--- 全プレイヤーの第3ラウンド特産品稼働完了 ---');
+            this.logRoundStart();
+            this.produceResources();
         } else {
             this.notifyChange();
         }
@@ -153,7 +151,7 @@ export class GameState {
                 return null;
             }
             // 捨て札をシャッフルして山札にする
-            this.marketDeck = [...this.marketDiscard].sort(() => Math.random() - 0.5);
+            this.marketDeck = shuffle(this.marketDiscard, this.random);
             this.marketDiscard = [];
             logger.log('マーケット補充山札が尽きたため、捨て札をシャッフルして新しい補充山札を作りました。');
         }
@@ -163,20 +161,18 @@ export class GameState {
 
     produceResources() {
         // 全プレイヤーの稼働特産品から資源を生産
-        import('./data.js').then(({ Specialties }) => {
-            this.players.forEach(p => {
-                let produced = [];
-                p.activeSpecialties.forEach(specId => {
-                    const resId = Specialties[specId].resource;
-                    p.hand.push(resId);
-                    produced.push(Specialties[specId].name);
-                });
-                if (produced.length > 0) {
-                    logger.log(`${p.name} が資源を生産しました: ${produced.join(', ')}`);
-                }
+        this.players.forEach(p => {
+            let produced = [];
+            p.activeSpecialties.forEach(specId => {
+                const resId = Specialties[specId].resource;
+                p.hand.push(resId);
+                produced.push(Specialties[specId].name);
             });
-            this.checkTurnStart();
+            if (produced.length > 0) {
+                logger.log(`${p.name} が資源を生産しました: ${produced.join(', ')}`);
+            }
         });
+        this.checkTurnStart();
     }
 
     checkTurnStart() {
@@ -219,9 +215,7 @@ export class GameState {
     completeGainResource(playerId, resourceId) {
         const p = this.players.find(x => x.id === playerId);
         p.hand.push(resourceId);
-        import('./data.js').then(({ Resources }) => {
-            logger.log(`${p.name} が食料市の効果で ${Resources[resourceId].name} を得ました。`);
-        });
+        logger.log(`${p.name} が食料市の効果で ${Resources[resourceId].name} を得ました。`);
         this.phase = 'playing';
         this.notifyChange();
     }
@@ -248,15 +242,13 @@ export class GameState {
 
         p.hand.push(...gains);
 
-        import('./data.js').then(({ Resources }) => {
-            const discardedText = discardedCards.length > 0
-                ? discardedCards.map(id => Resources[id].name).join(', ')
-                : 'なし';
-            const gainedText = gains.length > 0
-                ? gains.map(id => Resources[id].name).join(', ')
-                : 'なし';
-            logger.log(`${p.name} が${sourceName}の効果を解決しました。破棄: ${discardedText} / 獲得: ${gainedText}`);
-        });
+        const discardedText = discardedCards.length > 0
+            ? discardedCards.map(id => Resources[id].name).join(', ')
+            : 'なし';
+        const gainedText = gains.length > 0
+            ? gains.map(id => Resources[id].name).join(', ')
+            : 'なし';
+        logger.log(`${p.name} が${sourceName}の効果を解決しました。破棄: ${discardedText} / 獲得: ${gainedText}`);
 
         this.phase = 'playing';
         this.notifyChange();
@@ -296,9 +288,7 @@ export class GameState {
             this.marketCards[gainMarketIndex] = null;
             this.marketDiscard.push(obtained);
             p.hand.push(obtained);
-            import('./data.js').then(({ Resources }) => {
-                logger.log(`${p.name} が造船材調達の効果で ${Resources[obtained].name} を得ました。`);
-            });
+            logger.log(`${p.name} が造船材調達の効果で ${Resources[obtained].name} を得ました。`);
         }
         this.phase = 'playing';
         this.notifyChange();
@@ -419,50 +409,46 @@ export class GameState {
 
     logRoundStart() {
         logger.log(`--- ラウンド ${this.round} 開始 ---`);
-        import('./data.js').then(({ Demands }) => {
-            const pubDemands = this.demandCards.map(id => {
-                const d = Demands.find(x => x.id === id);
-                return d ? d.name : '不明';
-            });
-            logger.log(`[公開需要カード] ${pubDemands.join(', ')}`);
+        const pubDemands = this.demandCards.map(id => {
+            const d = Demands.find(x => x.id === id);
+            return d ? d.name : '不明';
         });
+        logger.log(`[公開需要カード] ${pubDemands.join(', ')}`);
     }
 
     calculateFinalScores() {
         logger.log('====== 最終結果 ======');
         logger.log(`プレイ人数: ${this.players.length}人`);
 
-        import('./data.js').then(({ Demands, FixedRoles, Resources }) => {
-            const sortedPlayers = [...this.players].sort((a, b) => b.score - a.score);
-            sortedPlayers.forEach((p, i) => {
-                let demandPts = 0;
-                p.achievedDemands.forEach(record => {
-                    if (typeof record === 'string') {
-                        const d = Demands.find(x => x.id === record);
-                        if (d) demandPts += d.points;
-                    } else {
-                        demandPts += record.points || 0;
-                    }
-                });
-                let rolePts = 0;
-                p.achievedRoles.forEach(id => {
-                    const r = FixedRoles.find(x => x.id === id);
-                    if (r) rolePts += r.points;
-                });
-                const bonusPts = p.score - demandPts - rolePts;
-                const bonusStr = bonusPts > 0 ? `, 加工ボーナス: ${bonusPts}` : '';
-                const handCounts = p.hand.reduce((counts, resourceId) => {
-                    counts[resourceId] = (counts[resourceId] || 0) + 1;
-                    return counts;
-                }, {});
-                const handDetails = Object.keys(Resources)
-                    .filter(resourceId => handCounts[resourceId] > 0)
-                    .map(resourceId => `${Resources[resourceId].name}${handCounts[resourceId]}枚`)
-                    .join(', ') || 'なし';
-                logger.log(`${i + 1}位: ${p.name} - 最終得点: ${p.score}点 (需要基本点: ${demandPts}, 固定役基本点: ${rolePts}${bonusStr}) | 残り手札: ${p.hand.length}枚 [${handDetails}]`);
+        const sortedPlayers = [...this.players].sort((a, b) => b.score - a.score);
+        sortedPlayers.forEach((p, i) => {
+            let demandPts = 0;
+            p.achievedDemands.forEach(record => {
+                if (typeof record === 'string') {
+                    const d = Demands.find(x => x.id === record);
+                    if (d) demandPts += d.points;
+                } else {
+                    demandPts += record.points || 0;
+                }
             });
-            logger.log('======================');
+            let rolePts = 0;
+            p.achievedRoles.forEach(id => {
+                const r = FixedRoles.find(x => x.id === id);
+                if (r) rolePts += r.points;
+            });
+            const bonusPts = p.score - demandPts - rolePts;
+            const bonusStr = bonusPts > 0 ? `, 加工ボーナス: ${bonusPts}` : '';
+            const handCounts = p.hand.reduce((counts, resourceId) => {
+                counts[resourceId] = (counts[resourceId] || 0) + 1;
+                return counts;
+            }, {});
+            const handDetails = Object.keys(Resources)
+                .filter(resourceId => handCounts[resourceId] > 0)
+                .map(resourceId => `${Resources[resourceId].name}${handCounts[resourceId]}枚`)
+                .join(', ') || 'なし';
+            logger.log(`${i + 1}位: ${p.name} - 最終得点: ${p.score}点 (需要基本点: ${demandPts}, 固定役基本点: ${rolePts}${bonusStr}) | 残り手札: ${p.hand.length}枚 [${handDetails}]`);
         });
+        logger.log('======================');
     }
 
     getCurrentPlayer() {

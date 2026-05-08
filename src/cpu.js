@@ -1,5 +1,75 @@
 import { Demands, FixedRoles, Resources, ResourceTypes, Specialties, getDemandVariants } from './data.js';
 import * as Actions from './actions.js';
+import { logger } from './logger.js';
+
+export const DEFAULT_CPU_PROFILE_ID = 'balanced';
+
+export const CPU_PROFILES = {
+    balanced: {
+        id: 'balanced',
+        name: 'Balanced',
+        demandWeight: 1,
+        roleWeight: 1,
+        effectWeight: 1,
+        processingWeight: 1,
+        marketWeight: 1,
+        specialtyWeight: 1,
+        turnPriority: ['demand', 'extra_demand', 'fixed_role', 'processing', 'market']
+    },
+    demand: {
+        id: 'demand',
+        name: 'Demand Focus',
+        demandWeight: 1.35,
+        roleWeight: 0.85,
+        effectWeight: 1.1,
+        processingWeight: 1,
+        marketWeight: 1.05,
+        specialtyWeight: 1,
+        turnPriority: ['demand', 'extra_demand', 'market', 'processing', 'fixed_role']
+    },
+    role: {
+        id: 'role',
+        name: 'Role Focus',
+        demandWeight: 0.9,
+        roleWeight: 1.45,
+        effectWeight: 0.95,
+        processingWeight: 0.95,
+        marketWeight: 0.95,
+        specialtyWeight: 1,
+        turnPriority: ['fixed_role', 'demand', 'processing', 'market', 'extra_demand']
+    },
+    engine: {
+        id: 'engine',
+        name: 'Engine Focus',
+        demandWeight: 0.95,
+        roleWeight: 1,
+        effectWeight: 1.2,
+        processingWeight: 1.55,
+        marketWeight: 1.1,
+        specialtyWeight: 1.1,
+        turnPriority: ['processing', 'demand', 'fixed_role', 'market', 'extra_demand']
+    },
+    trader: {
+        id: 'trader',
+        name: 'Trader',
+        demandWeight: 1,
+        roleWeight: 0.95,
+        effectWeight: 1.05,
+        processingWeight: 0.9,
+        marketWeight: 1.45,
+        specialtyWeight: 1,
+        turnPriority: ['demand', 'market', 'fixed_role', 'processing', 'extra_demand']
+    }
+};
+
+export function getCpuProfile(profileId = DEFAULT_CPU_PROFILE_ID) {
+    const id = typeof profileId === 'string' ? profileId : profileId?.id;
+    return CPU_PROFILES[id] || CPU_PROFILES[DEFAULT_CPU_PROFILE_ID];
+}
+
+function getPlayerProfile(player) {
+    return getCpuProfile(player.cpuProfileId || player.cpuProfile?.id || DEFAULT_CPU_PROFILE_ID);
+}
 
 // =============================================
 // 共通ヘルパー
@@ -26,6 +96,151 @@ function getAllSubsets(handIndices) {
         }
     }
     return result.filter(a => a.length > 0).sort((a, b) => a.length - b.length);
+}
+
+function logCpuDecision(player, action, reason, data = {}) {
+    const profile = getPlayerProfile(player);
+    logger.log(`CPU_DECISION ${player.name} ${action}: ${reason}`, {
+        type: 'cpu_decision',
+        playerId: player.id,
+        playerName: player.name,
+        profileId: profile.id,
+        profileName: profile.name,
+        action,
+        reason,
+        ...data
+    });
+}
+
+function getResourceCount(cards, resourceId) {
+    return cards.filter(id => id === resourceId).length;
+}
+
+function getResourceTargetScore(game, player, resourceId) {
+    const resource = Resources[resourceId];
+    if (!resource) return 0;
+    const profile = getPlayerProfile(player);
+
+    let score = resource.type === ResourceTypes.BASE ? 1.2 : 1;
+    const demandObjs = game.demandCards
+        .map(id => Demands.find(d => d.id === id))
+        .filter(Boolean);
+    const roleObjs = FixedRoles.filter(role => !player.achievedRoles.includes(role.id));
+
+    demandObjs.forEach(demand => {
+        getDemandVariants(demand).forEach(variant => {
+            if (variant.req[resourceId]) score += variant.req[resourceId] * 2 * profile.demandWeight;
+            if (resource.type === ResourceTypes.BASE && variant.req._anyBase) score += 0.5 * profile.demandWeight;
+            if (resource.type === ResourceTypes.TRADE && variant.req._anyTrade) score += 0.75 * profile.demandWeight;
+            if ((variant.req._anyProcessed || variant.req._diffProcessed) && player.processingPlants?.includes(resourceId)) {
+                score += 2.5 * profile.processingWeight;
+            }
+        });
+        if (demand.bonus?.targets?.includes(resourceId)) score += (demand.bonus.points || 1) * profile.demandWeight;
+    });
+
+    roleObjs.forEach(role => {
+        if (role.req[resourceId]) score += role.req[resourceId] * 1.4 * profile.roleWeight;
+        if (resource.type === ResourceTypes.BASE && (role.req._anyBase || role.req._diffBase)) score += 0.35 * profile.roleWeight;
+        if (resource.type === ResourceTypes.TRADE && (role.req._anyTrade || role.req._diffTrade)) score += 0.6 * profile.roleWeight;
+        if ((role.req._anyProcessed || role.req._diffProcessed) && player.processingPlants?.includes(resourceId)) {
+            score += 2 * profile.processingWeight;
+        }
+        if (role.bonus?.targets?.includes(resourceId)) score += (role.bonus.points || 1) * profile.roleWeight;
+    });
+
+    return score;
+}
+
+function getHandResourceValue(game, player, resourceId, hand = player.hand) {
+    const resource = Resources[resourceId];
+    if (!resource) return 0;
+
+    const needScores = getBaseResourceNeedScores(game, player, hand);
+    let score = getResourceTargetScore(game, player, resourceId);
+    score += (needScores[resourceId] || 0) * 2.5;
+
+    const sameCount = getResourceCount(hand, resourceId);
+    if (sameCount > 1) score -= (sameCount - 1) * 0.4;
+
+    if (resource.type === ResourceTypes.BASE) {
+        const hasMatchingActiveSpecialty = player.activeSpecialties.some(sId => Specialties[sId]?.resource === resourceId);
+        const hasPlant = player.processingPlants?.includes(resourceId);
+        if (hasMatchingActiveSpecialty && !hasPlant) {
+            const relevantPlant = hasRelevantProcessingOpportunity(game, player, hand, null, false);
+            const profile = getPlayerProfile(player);
+            score += (relevantPlant ? 2.5 : 0.8) * profile.processingWeight;
+        }
+    }
+
+    return score;
+}
+
+function scoreSpecialtyCombo(game, player, indices) {
+    const profile = getPlayerProfile(player);
+    const existingResources = new Set(
+        player.activeSpecialties
+            .map(sId => Specialties[sId]?.resource)
+            .filter(Boolean)
+    );
+    const selectedResources = new Set();
+    let score = 0;
+    let baseCount = 0;
+    let tradeCount = 0;
+
+    indices.forEach(index => {
+        const specialtyId = player.inactiveSpecialties[index];
+        const spec = Specialties[specialtyId];
+        if (!spec) return;
+        const resource = Resources[spec.resource];
+        if (!resource) return;
+
+        if (resource.type === ResourceTypes.BASE) baseCount++;
+        if (resource.type === ResourceTypes.TRADE) tradeCount++;
+
+        score += (resource.type === ResourceTypes.BASE ? 5 : 3.5) * profile.specialtyWeight;
+        score += getResourceTargetScore(game, player, spec.resource);
+
+        if (selectedResources.has(spec.resource) || existingResources.has(spec.resource)) {
+            score -= 3;
+        } else {
+            score += 2;
+        }
+        selectedResources.add(spec.resource);
+    });
+
+    if (baseCount >= 2) score += 1.5;
+    if (tradeCount >= 1) score += 0.5;
+    if (baseCount === 0) score -= 2;
+
+    return score;
+}
+
+function chooseSpecialtyIndices(game, player, count) {
+    const available = player.inactiveSpecialties.map((_, index) => index);
+    if (available.length <= count) {
+        return {
+            indices: available,
+            candidates: [{
+                indices: available,
+                score: scoreSpecialtyCombo(game, player, available),
+                specialties: available.map(index => player.inactiveSpecialties[index])
+            }]
+        };
+    }
+
+    const scored = indexCombinations(available, count)
+        .map(indices => ({
+            indices,
+            score: scoreSpecialtyCombo(game, player, indices),
+            specialties: indices.map(index => player.inactiveSpecialties[index])
+        }))
+        .sort((a, b) => b.score - a.score);
+
+    return {
+        indices: scored[0].indices,
+        candidates: scored.slice(0, 5)
+    };
 }
 
 /**
@@ -124,6 +339,7 @@ function getValidDiscountedMarketTrades(player, marketCards) {
 }
 
 function getBaseResourceNeedScores(game, player, hand = player.hand, excludedDemandId = null) {
+    const profile = getPlayerProfile(player);
     const scores = {};
     const demandObjs = game.demandCards
         .filter(id => id !== excludedDemandId)
@@ -136,7 +352,7 @@ function getBaseResourceNeedScores(game, player, hand = player.hand, excludedDem
             Object.entries(variant.req).forEach(([key, val]) => {
                 if (!key.startsWith('_') && Resources[key]?.type === ResourceTypes.BASE) {
                     const has = hand.filter(id => id === key).length;
-                    scores[key] = (scores[key] || 0) + Math.max(0, val - has);
+                    scores[key] = (scores[key] || 0) + Math.max(0, val - has) * profile.demandWeight;
                 }
             });
         });
@@ -146,7 +362,7 @@ function getBaseResourceNeedScores(game, player, hand = player.hand, excludedDem
         Object.entries(obj.req).forEach(([key, val]) => {
             if (!key.startsWith('_') && Resources[key]?.type === ResourceTypes.BASE) {
                 const has = hand.filter(id => id === key).length;
-                scores[key] = (scores[key] || 0) + Math.max(0, val - has);
+                scores[key] = (scores[key] || 0) + Math.max(0, val - has) * profile.roleWeight;
             }
         });
     });
@@ -246,17 +462,20 @@ const DemandEffectEstimators = {
 
 function estimateDemandEffectValue(game, player, demand, remainingHand) {
     if (!demand.effect) return 0;
+    const profile = getPlayerProfile(player);
     const estimator = DemandEffectEstimators[demand.effect];
     const value = estimator
         ? estimator({ game, player, demand, remainingHand })
         : DEFAULT_UNKNOWN_EFFECT_VALUE;
-    return Math.max(0, Math.min(MAX_EFFECT_VALUE, value));
+    return Math.max(0, Math.min(MAX_EFFECT_VALUE, value * profile.effectWeight));
 }
 
 function evaluateDemandScore(game, player, demand, variant, check, hand, usedIndices) {
+    const profile = getPlayerProfile(player);
     const remainingHand = [...hand];
     [...usedIndices].sort((a, b) => b - a).forEach(idx => remainingHand.splice(idx, 1));
-    return variant.points + check.bonusPoints + estimateDemandEffectValue(game, player, demand, remainingHand);
+    return (variant.points + check.bonusPoints) * profile.demandWeight +
+        estimateDemandEffectValue(game, player, demand, remainingHand);
 }
 
 function getBestDemandEvaluation(game, player, demand, hand = player.hand) {
@@ -298,6 +517,7 @@ function chooseCpuMarketTrade(game, player) {
     const trades = getValidMarketTrades(player, game.marketCards);
     if (trades.length === 0) return null;
 
+    const profile = getPlayerProfile(player);
     const processed = player.processingPlants || [];
     const demandObjs = game.demandCards.map(id => Demands.find(d => d.id === id)).filter(Boolean);
     const roleObjs = FixedRoles.filter(r => !player.achievedRoles.includes(r.id));
@@ -342,7 +562,7 @@ function chooseCpuMarketTrade(game, player) {
             } else if (!afterEval) {
                 const before = Math.min(...getDemandVariants(demand).map(variant => missingCount(player.hand, variant.req)));
                 const after = Math.min(...getDemandVariants(demand).map(variant => missingCount(simHand, variant.req)));
-                if (after < before) score += 2;
+                if (after < before) score += 2 * profile.demandWeight;
             }
         }
 
@@ -351,16 +571,16 @@ function chooseCpuMarketTrade(game, player) {
             const nowOk = isAchievable(player.hand, role.req, role.bonus);
             const afterOk = isAchievable(simHand, role.req, role.bonus);
             if (afterOk && !nowOk) {
-                score += role.points + (role.bonus ? role.bonus.points || 0 : 0);
+                score += (role.points + (role.bonus ? role.bonus.points || 0 : 0)) * profile.roleWeight;
             } else if (!afterOk) {
                 const before = missingCount(player.hand, role.req);
                 const after = missingCount(simHand, role.req);
-                if (after < before) score += 1;
+                if (after < before) score += profile.roleWeight;
             }
         }
 
         // 交易品を取得するなら小加点
-        if (acquired && Resources[acquired].type === ResourceTypes.TRADE) score += 1;
+        if (acquired && Resources[acquired].type === ResourceTypes.TRADE) score += profile.marketWeight;
 
         return { trade, score };
     });
@@ -371,6 +591,48 @@ function chooseCpuMarketTrade(game, player) {
     if (scored[0].score <= 0) return null;
 
     return scored[0].trade;
+}
+
+function scoreTradeProgress(game, player, trade) {
+    const acquired = game.marketCards[trade.marketIndex];
+    if (!acquired) return -999;
+    const profile = getPlayerProfile(player);
+
+    const simHand = [...player.hand];
+    [...trade.handIndices].sort((a, b) => b - a).forEach(i => simHand.splice(i, 1));
+    simHand.push(acquired);
+
+    const beforeValue = player.hand.reduce((sum, resourceId) =>
+        sum + getHandResourceValue(game, player, resourceId, player.hand), 0);
+    const afterValue = simHand.reduce((sum, resourceId) =>
+        sum + getHandResourceValue(game, player, resourceId, simHand), 0);
+
+    let score = afterValue - beforeValue;
+    const demandObjs = game.demandCards.map(id => Demands.find(d => d.id === id)).filter(Boolean);
+    demandObjs.forEach(demand => {
+        const before = getBestDemandEvaluation(game, player, demand, player.hand);
+        const after = getBestDemandEvaluation(game, player, demand, simHand);
+        if (after && !before) score += after.score;
+    });
+
+    if (Resources[acquired].type === ResourceTypes.TRADE) score += 0.75 * profile.marketWeight;
+    return score;
+}
+
+function chooseCpuDiscountedMarketTrade(game, player) {
+    const trades = getValidDiscountedMarketTrades(player, game.marketCards);
+    if (trades.length === 0) return null;
+
+    const scored = trades
+        .map(trade => ({ trade, score: scoreTradeProgress(game, player, trade) }))
+        .sort((a, b) => b.score - a.score);
+
+    if (scored[0].score <= 0) return null;
+    return scored[0];
+}
+
+function getTurnDemandCount(game) {
+    return game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
 }
 
 // =============================================
@@ -400,12 +662,26 @@ export class CPU {
     }
 
     static cpuSetup(game, player) {
-        game.completeSetup(player.id, [0, 1, 2]);
+        const choice = chooseSpecialtyIndices(game, player, 3);
+        const selectedIndices = [...choice.indices];
+        logCpuDecision(player, 'setup', 'selected highest scoring initial specialties', {
+            selectedIndices,
+            selectedSpecialties: selectedIndices.map(index => player.inactiveSpecialties[index]),
+            candidates: choice.candidates
+        });
+        game.completeSetup(player.id, selectedIndices);
         return true;
     }
 
     static cpuFreeDevelopment(game, player) {
-        game.completeFreeDevelopment(player.id, [0]);
+        const choice = chooseSpecialtyIndices(game, player, 1);
+        const selectedIndices = [...choice.indices];
+        logCpuDecision(player, 'free_development', 'selected highest scoring specialty for free activation', {
+            selectedIndices,
+            selectedSpecialties: selectedIndices.map(index => player.inactiveSpecialties[index]),
+            candidates: choice.candidates
+        });
+        game.completeFreeDevelopment(player.id, selectedIndices);
         return true;
     }
 
@@ -413,7 +689,20 @@ export class CPU {
         const maxHand = player.maxHandSize || game.maxHandSize;
         const excess = player.hand.length - maxHand;
         if (excess <= 0) return false;
-        const discardIndices = Array.from({ length: excess }, (_, i) => i);
+        const discardCandidates = player.hand
+            .map((id, i) => ({
+                i,
+                resourceId: id,
+                score: getHandResourceValue(game, player, id)
+            }))
+            .sort((a, b) => a.score - b.score || a.i - b.i);
+        const discardIndices = discardCandidates.slice(0, excess).map(candidate => candidate.i);
+        logCpuDecision(player, 'discard', 'discarded lowest value hand resources', {
+            excess,
+            discardIndices,
+            discardedResources: discardIndices.map(index => player.hand[index]),
+            candidates: discardCandidates
+        });
         game.completeDiscard(player.id, discardIndices);
         return true;
     }
@@ -431,12 +720,17 @@ export class CPU {
             if (s > bestScore) { bestScore = s; best = r.id; }
         });
 
+        logCpuDecision(player, 'gain_resource', 'selected most needed base resource', {
+            selectedResource: best,
+            needScores: scores
+        });
         game.completeGainResource(player.id, best);
         return true;
     }
 
     // 効果: 造船材調達 — 需要に関係ない2枚を入れ替える
     static cpuMarketReplace(game, player) {
+        const profile = getPlayerProfile(player);
         const demandObjs = game.demandCards.map(id => Demands.find(d => d.id === id)).filter(Boolean);
         // マーケットの各カードの「欲しさ」をスコア化
         const marketScores = game.marketCards.map((id, i) => {
@@ -444,9 +738,9 @@ export class CPU {
             let score = 0;
             demandObjs.forEach(d => {
                 getDemandVariants(d).forEach(variant => {
-                    if (variant.req[id]) score += variant.req[id];
-                    if (Resources[id].type === ResourceTypes.TRADE && variant.req._anyTrade) score += 0.75;
-                    if (Resources[id].type === ResourceTypes.BASE && variant.req._anyBase) score += 0.5;
+                    if (variant.req[id]) score += variant.req[id] * profile.demandWeight;
+                    if (Resources[id].type === ResourceTypes.TRADE && variant.req._anyTrade) score += 0.75 * profile.demandWeight;
+                    if (Resources[id].type === ResourceTypes.BASE && variant.req._anyBase) score += 0.5 * profile.demandWeight;
                 });
             });
             return { i, score };
@@ -454,6 +748,10 @@ export class CPU {
         // スコアが低い順に最大2枚を入れ替え
         marketScores.sort((a, b) => a.score - b.score);
         const replaceIndices = marketScores.slice(0, 2).filter(x => x.score < 1).map(x => x.i);
+        logCpuDecision(player, 'market_replace', 'replaced low value market cards and optionally gained a needed base resource', {
+            replaceIndices,
+            marketScores
+        });
         game.replaceMarketCards(replaceIndices);
 
         const scores = this.getBaseResourceNeedScores(game, player);
@@ -462,6 +760,10 @@ export class CPU {
             .filter(x => x.id && Resources[x.id].type === ResourceTypes.BASE)
             .sort((a, b) => b.score - a.score);
         const gainIndex = gainCandidates.length > 0 && gainCandidates[0].score > 0 ? gainCandidates[0].i : -1;
+        logCpuDecision(player, 'market_replace_gain', 'selected best base resource from refreshed market', {
+            gainIndex,
+            gainCandidates
+        });
         game.completeMarketReplaceGain(player.id, gainIndex);
         return true;
     }
@@ -485,13 +787,25 @@ export class CPU {
         }
 
         const discardCandidates = player.hand
-            .map((id, i) => ({ i, score: scores[id] || 0 }))
+            .map((id, i) => ({
+                i,
+                resourceId: id,
+                score: getHandResourceValue(game, player, id)
+            }))
             .sort((a, b) => a.score - b.score);
 
         const exchangeCount = Math.min(maxCount, wantedResources.length, discardCandidates.length);
         const discardIndices = discardCandidates.slice(0, exchangeCount).map(x => x.i);
         const gainResources = wantedResources.slice(0, exchangeCount).map(x => x.id);
 
+        logCpuDecision(player, 'hand_exchange', 'exchanged low value hand resources for needed base resources', {
+            sourceName,
+            maxCount,
+            discardIndices,
+            gainResources,
+            discardCandidates,
+            wantedResources
+        });
         game.completeHandExchange(player.id, discardIndices, gainResources, maxCount, sourceName);
         return true;
     }
@@ -513,6 +827,13 @@ export class CPU {
         }
 
         if (!best) return false;
+        logCpuDecision(player, 'demand', 'achieved highest scoring available demand', {
+            demandId: best.demand.id,
+            demandName: best.demand.name,
+            variantId: best.variant.id,
+            score: best.score,
+            handIndices: best.handIndices
+        });
         const res = Actions.executeDemand(game, player, best.demand.id, best.handIndices);
         return res.success;
     }
@@ -525,6 +846,10 @@ export class CPU {
                 const spec = Specialties[sId];
                 if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
                 if (processed.includes(spec.resource)) continue;
+                logCpuDecision(player, 'free_processing_plant', 'used free plant effect on first buildable base specialty', {
+                    specialtyId: sId,
+                    resourceId: spec.resource
+                });
                 const res = Actions.executeBuildProcessingPlant(game, player, sId, null, true);
                 if (res.success) return true;
             }
@@ -534,6 +859,11 @@ export class CPU {
         if (game.turnState.freeMarketExchange) {
             const best = chooseCpuMarketTrade(game, player);
             if (best) {
+                logCpuDecision(player, 'free_market_exchange', 'used free market exchange on best scored normal trade', {
+                    handIndices: best.handIndices,
+                    marketIndex: best.marketIndex,
+                    targetResource: game.marketCards[best.marketIndex]
+                });
                 const res = Actions.executeExchange(game, player, best.handIndices, best.marketIndex, {
                     free: true,
                     source: '船団整備効果'
@@ -544,10 +874,15 @@ export class CPU {
         }
 
         if (game.turnState.discountedExchange) {
-            const discountTrades = getValidDiscountedMarketTrades(player, game.marketCards);
-            if (discountTrades.length > 0) {
-                const best = discountTrades[0];
-                const res = Actions.executeDiscountedExchange(game, player, best.handIndices, best.marketIndex);
+            const best = chooseCpuDiscountedMarketTrade(game, player);
+            if (best) {
+                logCpuDecision(player, 'discounted_exchange', 'used discounted exchange on best scored discounted trade', {
+                    handIndices: best.trade.handIndices,
+                    marketIndex: best.trade.marketIndex,
+                    targetResource: game.marketCards[best.trade.marketIndex],
+                    score: best.score
+                });
+                const res = Actions.executeDiscountedExchange(game, player, best.trade.handIndices, best.trade.marketIndex);
                 if (res.success) return true;
             }
             game.turnState.discountedExchange = false;
@@ -556,98 +891,139 @@ export class CPU {
         return false;
     }
 
-    static cpuTurn(game, player) {
+    static tryAchieveBestFixedRole(game, player) {
         const processed = player.processingPlants || [];
+        const profile = getPlayerProfile(player);
+        if (game.turnState.roleAchieved) return false;
 
+        const subsets = getAllSubsets(player.hand.map((_, i) => i));
+        let bestRole = null;
+        let bestIndices = null;
+        let bestWeightedScore = -1;
+        let bestRawPoints = 0;
+
+        for (const role of FixedRoles) {
+            if (player.achievedRoles.includes(role.id)) continue;
+            for (const subset of subsets) {
+                const cards = subset.map(i => player.hand[i]);
+                const check = Actions.ActionValidator.checkRequirements(cards, role.req, processed, role.bonus);
+                if (!check.valid) continue;
+
+                const rawPoints = role.points + check.bonusPoints;
+                const weightedScore = rawPoints * profile.roleWeight;
+                if (weightedScore > bestWeightedScore) {
+                    bestWeightedScore = weightedScore;
+                    bestRawPoints = rawPoints;
+                    bestRole = role;
+                    bestIndices = subset;
+                }
+            }
+        }
+
+        if (!bestRole) return false;
+        logCpuDecision(player, 'fixed_role', 'achieved highest point available fixed role', {
+            roleId: bestRole.id,
+            roleName: bestRole.name,
+            points: bestRawPoints,
+            weightedScore: bestWeightedScore,
+            handIndices: bestIndices
+        });
+        const res = Actions.executeFixedRole(game, player, bestRole.id, bestIndices);
+        return res.success;
+    }
+
+    static tryBuildRelevantProcessingPlant(game, player) {
+        if (game.actionsLeft <= 0) return false;
+
+        const processed = player.processingPlants || [];
+        const profile = getPlayerProfile(player);
+        const candidates = [];
+
+        for (let i = 0; i < player.activeSpecialties.length; i++) {
+            const specialtyId = player.activeSpecialties[i];
+            const spec = Specialties[specialtyId];
+            if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
+            if (processed.includes(spec.resource)) continue;
+
+            const handIndex = player.hand.indexOf(spec.resource);
+            if (handIndex === -1) continue;
+
+            const hasProcessedReq = [
+                ...game.demandCards.map(id => Demands.find(d => d.id === id)),
+                ...FixedRoles.filter(r => !player.achievedRoles.includes(r.id))
+            ].some(obj => obj && (
+                (obj.req && (obj.req['_anyProcessed'] || obj.req['_diffProcessed'])) ||
+                (obj.bonus && obj.bonus.targets && obj.bonus.targets.includes(spec.resource))
+            ));
+
+            if (hasProcessedReq) {
+                candidates.push({
+                    specialtyId,
+                    resourceId: spec.resource,
+                    handIndex,
+                    score: getResourceTargetScore(game, player, spec.resource) * profile.processingWeight
+                });
+            }
+        }
+
+        candidates.sort((a, b) => b.score - a.score);
+        const best = candidates[0];
+        if (!best) return false;
+
+        logCpuDecision(player, 'build_processing_plant', 'built plant because public targets can use processed resources or bonuses', {
+            ...best,
+            candidates
+        });
+        const res = Actions.executeBuildProcessingPlant(game, player, best.specialtyId, best.handIndex);
+        return res.success;
+    }
+
+    static tryBestMarketExchange(game, player) {
+        if (game.actionsLeft <= 0) return false;
+
+        const best = chooseCpuMarketTrade(game, player);
+        if (!best) return false;
+
+        logCpuDecision(player, 'market_exchange', 'executed best positive-score market trade', {
+            handIndices: best.handIndices,
+            marketIndex: best.marketIndex,
+            targetResource: game.marketCards[best.marketIndex]
+        });
+        const res = Actions.executeExchange(game, player, best.handIndices, best.marketIndex);
+        return res.success;
+    }
+
+    static cpuTurn(game, player) {
         // 需要達成で得た即時効果は、次の通常アクションより先に処理する。
         if (this.resolvePendingTurnEffect(game, player)) {
             return true;
         }
 
-        // -------------------------------------------------
-        // 優先度1: 需要カードの達成 (1回目は無料)
-        // -------------------------------------------------
-        const demandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
-        if (demandCount === 0 && this.tryAchieveBestDemand(game, player)) {
-            return true;
-        }
-
-        // -------------------------------------------------
-        // 優先度2: 追加需要達成 (2回目以降は1AP)
-        // -------------------------------------------------
-        const currentDemandCount = game.turnState.demandAchieveCount ?? (game.turnState.demandAchieved ? 1 : 0);
-        if (currentDemandCount > 0 && game.actionsLeft > 0 && this.tryAchieveBestDemand(game, player)) {
-            return true;
-        }
-
-        // -------------------------------------------------
-        // 優先度3: 固定役の達成 (1ターンに1回まで)
-        // -------------------------------------------------
-        if (!game.turnState.roleAchieved) {
-            const subsets = getAllSubsets(player.hand.map((_, i) => i));
-            let bestRole = null, bestIndices = null, maxPts = -1;
-
-            for (const role of FixedRoles) {
-                if (player.achievedRoles.includes(role.id)) continue;
-                for (const subset of subsets) {
-                    const cards = subset.map(i => player.hand[i]);
-                    const check = Actions.ActionValidator.checkRequirements(cards, role.req, processed, role.bonus);
-                    if (check.valid) {
-                        const pts = role.points + check.bonusPoints;
-                        if (pts > maxPts) { maxPts = pts; bestRole = role; bestIndices = subset; }
-                    }
-                }
+        const profile = getPlayerProfile(player);
+        for (const action of profile.turnPriority) {
+            const demandCount = getTurnDemandCount(game);
+            if (action === 'demand' && demandCount === 0 && this.tryAchieveBestDemand(game, player)) {
+                return true;
             }
-
-            if (bestRole) {
-                const res = Actions.executeFixedRole(game, player, bestRole.id, bestIndices);
-                if (res.success) return true;
+            if (action === 'extra_demand' && demandCount > 0 && game.actionsLeft > 0 && this.tryAchieveBestDemand(game, player)) {
+                return true;
+            }
+            if (action === 'fixed_role' && this.tryAchieveBestFixedRole(game, player)) {
+                return true;
+            }
+            if (action === 'processing' && this.tryBuildRelevantProcessingPlant(game, player)) {
+                return true;
+            }
+            if (action === 'market' && this.tryBestMarketExchange(game, player)) {
+                return true;
             }
         }
 
-        // -------------------------------------------------
-        // 優先度4: 加工所の建設 (1AP)
-        // -------------------------------------------------
-        if (game.actionsLeft > 0) {
-            for (let i = 0; i < player.activeSpecialties.length; i++) {
-                const sId = player.activeSpecialties[i];
-                const spec = Specialties[sId];
-                if (Resources[spec.resource].type !== ResourceTypes.BASE) continue;
-                if (processed.includes(spec.resource)) continue;
-
-                const handIdx = player.hand.indexOf(spec.resource);
-                if (handIdx === -1) continue;
-
-                // 現在の需要/役に加工品要求があれば建設する
-                const hasProcessedReq = [
-                    ...game.demandCards.map(id => Demands.find(d => d.id === id)),
-                    ...FixedRoles.filter(r => !player.achievedRoles.includes(r.id))
-                ].some(obj => obj && (
-                    (obj.req && (obj.req['_anyProcessed'] || obj.req['_diffProcessed'])) ||
-                    (obj.bonus && obj.bonus.targets && obj.bonus.targets.includes(spec.resource))
-                ));
-
-                if (hasProcessedReq) {
-                    const res = Actions.executeBuildProcessingPlant(game, player, sId, handIdx);
-                    if (res.success) return true;
-                }
-            }
-        }
-
-        // -------------------------------------------------
-        // 優先度5: マーケット交換 (1AP) — 全候補列挙→評価→実行
-        // -------------------------------------------------
-        if (game.actionsLeft > 0) {
-            const best = chooseCpuMarketTrade(game, player);
-            if (best) {
-                const res = Actions.executeExchange(game, player, best.handIndices, best.marketIndex);
-                if (res.success) return true;
-            }
-        }
-
-        // -------------------------------------------------
-        // 優先度6: ターン終了
-        // -------------------------------------------------
+        logCpuDecision(player, 'end_turn', 'no positive scoring action remained', {
+            profilePriority: profile.turnPriority,
+            actionsLeft: game.actionsLeft,
+            handCount: player.hand.length
+        });
         game.endTurn();
         return true;
     }

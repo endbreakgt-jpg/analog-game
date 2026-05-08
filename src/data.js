@@ -1,3 +1,5 @@
+import { shuffle } from './random.js';
+
 export const ResourceTypes = {
     BASE: 'base',
     TRADE: 'trade'
@@ -148,7 +150,7 @@ export const Demands = [
     { id: 'd_lux4', name: '献上品競売', reqText: '異なる交易品3種', req: { _diffTrade: 3 }, points: 7 }
 ];
 
-export const createMarketDeck = () => {
+export const createMarketDeck = (random = Math.random) => {
     let deck = [];
     Object.values(Resources).filter(r => r.type === ResourceTypes.BASE).forEach(r => {
         deck.push(r.id, r.id);
@@ -156,11 +158,11 @@ export const createMarketDeck = () => {
     Object.values(Resources).filter(r => r.type === ResourceTypes.TRADE).forEach(r => {
         deck.push(r.id);
     });
-    return deck.sort(() => Math.random() - 0.5); // シャッフル
+    return shuffle(deck, random); // シャッフル
 };
 
-export const createDemandDeck = () => {
-    return Demands.map(d => d.id).sort(() => Math.random() - 0.5); // シャッフル
+export const createDemandDeck = (random = Math.random) => {
+    return shuffle(Demands.map(d => d.id), random); // シャッフル
 };
 
 export const getDemandVariants = (demand) => {
@@ -177,11 +179,11 @@ export const getDemandVariants = (demand) => {
     }];
 };
 
-export const createSpecialtyDeck = () => {
+export const createSpecialtyDeck = (random = Math.random) => {
     let deck = [];
     // 12種 × 各3枚 = 36枚
     Object.values(Specialties).forEach(s => {
         deck.push(s.id, s.id, s.id);
     });
-    return deck.sort(() => Math.random() - 0.5);
+    return shuffle(deck, random);
 };

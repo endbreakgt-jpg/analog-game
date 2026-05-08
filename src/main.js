@@ -4,7 +4,7 @@ import * as Actions from './actions.js';
 import { logger } from './logger.js';
 import { CPU } from './cpu.js';
 
-document.addEventListener('DOMContentLoaded', () => {
+function init() {
     const game = new GameState();
     const ui = new UIManager();
 
@@ -218,4 +218,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('free-plant-overlay').classList.add('hidden');
         });
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+    init();
+}

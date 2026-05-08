@@ -2,6 +2,7 @@ export class GameLogger {
     constructor() {
         this.logs = [];
         this.onLogAdded = null;
+        this.consoleEnabled = true;
     }
 
     log(message, data = null) {
@@ -15,11 +16,17 @@ export class GameLogger {
             this.onLogAdded(entry);
         }
         // コンソールにも吐き出しておく（後で抽出・分析しやすいように）
-        if (data) {
-            console.log(`[LOG] ${message}`, data);
-        } else {
-            console.log(`[LOG] ${message}`);
+        if (this.consoleEnabled) {
+            if (data) {
+                console.log(`[LOG] ${message}`, data);
+            } else {
+                console.log(`[LOG] ${message}`);
+            }
         }
+    }
+
+    clear() {
+        this.logs = [];
     }
 
     exportLogs() {

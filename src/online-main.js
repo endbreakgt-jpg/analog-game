@@ -1,10 +1,26 @@
 import { GameState } from './game.js';
 import { UIManager } from './ui.js';
 
-const CLIENT_ID_KEY = 'analog-game-client-id';
-const PLAYER_NAME_KEY = 'analog-game-player-name';
+const CLIENT_ID_KEY = 'analog_game_client_id';
+const PLAYER_NAME_KEY = 'analog_game_player_name';
+const LEGACY_CLIENT_ID_KEY = 'analog-game-client-id';
+const LEGACY_PLAYER_NAME_KEY = 'analog-game-player-name';
 
-let clientId = localStorage.getItem(CLIENT_ID_KEY);
+function migrateStorageValue(key, legacyKey) {
+    const value = localStorage.getItem(key);
+    const legacyValue = localStorage.getItem(legacyKey);
+    if (value) {
+        localStorage.removeItem(legacyKey);
+        return value;
+    }
+    if (legacyValue) {
+        localStorage.setItem(key, legacyValue);
+        localStorage.removeItem(legacyKey);
+    }
+    return legacyValue;
+}
+
+let clientId = migrateStorageValue(CLIENT_ID_KEY, LEGACY_CLIENT_ID_KEY);
 if (!clientId) {
     clientId = crypto.randomUUID();
     localStorage.setItem(CLIENT_ID_KEY, clientId);
@@ -15,12 +31,18 @@ let latestPayload = null;
 let ui = null;
 let uiReady = false;
 
-document.addEventListener('DOMContentLoaded', () => {
+function init() {
     hideLocalSetup();
     createLobby();
     bindLobby();
     connectEvents();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+    init();
+}
 
 function hideLocalSetup() {
     const setup = document.getElementById('setup-overlay');
@@ -56,7 +78,7 @@ function createLobby() {
     `;
     document.body.appendChild(overlay);
 
-    const savedName = localStorage.getItem(PLAYER_NAME_KEY);
+    const savedName = migrateStorageValue(PLAYER_NAME_KEY, LEGACY_PLAYER_NAME_KEY);
     if (savedName) {
         document.getElementById('online-player-name').value = savedName;
     }
