@@ -12,6 +12,8 @@ import { logger } from './src/logger.js';
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(ROOT, 'logs');
+const SIMULATION_LOG_DIR = path.join(LOG_DIR, 'simulations');
+const ANALYSIS_LOG_DIR = path.join(LOG_DIR, 'analysis');
 const HIDDEN_RESOURCE = '__hidden_resource__';
 const HIDDEN_SPECIALTY = '__hidden_specialty__';
 const CORS_HEADERS = {
@@ -128,30 +130,38 @@ function runNodeScript(scriptRelativePath, args) {
 }
 
 async function listSimulationLogs() {
-    let entries = [];
-    try {
-        entries = await readdir(LOG_DIR, { withFileTypes: true });
-    } catch {
-        return [];
+    const roots = [
+        { dir: SIMULATION_LOG_DIR, group: 'simulation' },
+        { dir: ANALYSIS_LOG_DIR, group: 'analysis' }
+    ];
+    const files = [];
+    for (const root of roots) {
+        let entries = [];
+        try {
+            entries = await readdir(root.dir, { withFileTypes: true });
+        } catch {
+            continue;
+        }
+
+        const groupFiles = await Promise.all(entries
+            .filter(entry => entry.isFile())
+            .filter(entry => ['.jsonl', '.json', '.txt'].includes(path.extname(entry.name).toLowerCase()))
+            .map(async entry => {
+                const absolute = path.join(root.dir, entry.name);
+                const info = await stat(absolute);
+                const relativePath = path.relative(ROOT, absolute);
+                return {
+                    name: entry.name,
+                    path: relativePath,
+                    url: publicPath(relativePath),
+                    group: root.group,
+                    ext: path.extname(entry.name).toLowerCase(),
+                    size: info.size,
+                    modifiedAt: info.mtime.toISOString()
+                };
+            }));
+        files.push(...groupFiles);
     }
-
-    const files = await Promise.all(entries
-        .filter(entry => entry.isFile())
-        .filter(entry => ['.jsonl', '.json', '.txt'].includes(path.extname(entry.name).toLowerCase()))
-        .map(async entry => {
-            const absolute = path.join(LOG_DIR, entry.name);
-            const info = await stat(absolute);
-            const relativePath = path.relative(ROOT, absolute);
-            return {
-                name: entry.name,
-                path: relativePath,
-                url: publicPath(relativePath),
-                ext: path.extname(entry.name).toLowerCase(),
-                size: info.size,
-                modifiedAt: info.mtime.toISOString()
-            };
-        }));
-
     return files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
@@ -453,9 +463,9 @@ async function runSimulationFromRequest(body) {
     const analyze = Boolean(body.analyze);
 
     const simulationFiles = {
-        out: logFileResponse(path.join('logs', `cpu-gui-${timestamp}.jsonl`)),
-        summary: logFileResponse(path.join('logs', `cpu-gui-${timestamp}-summary.json`)),
-        report: logFileResponse(path.join('logs', `cpu-gui-${timestamp}.txt`))
+        out: logFileResponse(path.join('logs', 'simulations', `cpu-gui-${timestamp}.jsonl`)),
+        summary: logFileResponse(path.join('logs', 'simulations', `cpu-gui-${timestamp}-summary.json`)),
+        report: logFileResponse(path.join('logs', 'simulations', `cpu-gui-${timestamp}.txt`))
     };
 
     const simulateArgs = [
@@ -474,8 +484,8 @@ async function runSimulationFromRequest(body) {
     let analysis = null;
     if (analyze) {
         const analysisFiles = {
-            summary: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}-summary.json`)),
-            report: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}.txt`))
+            summary: logFileResponse(path.join('logs', 'analysis', `cpu-gui-analysis-${timestamp}-summary.json`)),
+            report: logFileResponse(path.join('logs', 'analysis', `cpu-gui-analysis-${timestamp}.txt`))
         };
         const analyzeResult = await runNodeScript('scripts/analyze-cpu-logs.mjs', [
             '--in', simulationFiles.out.path,
@@ -513,8 +523,8 @@ async function runAnalysisFromRequest(body) {
     if (inputs.length === 0) throw new Error('Select at least one JSONL log.');
 
     const analysisFiles = {
-        summary: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}-summary.json`)),
-        report: logFileResponse(path.join('logs', `cpu-gui-analysis-${timestamp}.txt`))
+        summary: logFileResponse(path.join('logs', 'analysis', `cpu-gui-analysis-${timestamp}-summary.json`)),
+        report: logFileResponse(path.join('logs', 'analysis', `cpu-gui-analysis-${timestamp}.txt`))
     };
     const result = await runNodeScript('scripts/analyze-cpu-logs.mjs', [
         '--in', inputs.join(','),

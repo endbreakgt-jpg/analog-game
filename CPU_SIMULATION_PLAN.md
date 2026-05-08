@@ -53,6 +53,7 @@ CPU-only matches should run without the browser so balance tuning can be based o
 - Write JSONL logs for each game and a compact JSON summary.
 - Write an integrated text report with item-level log notes.
 - Default output names include a timestamp when explicit output paths are not provided.
+- Simulation outputs are written under `logs/simulations`.
 
 ### 4. Annotated Report
 
@@ -106,6 +107,7 @@ CPU-only matches should run without the browser so balance tuning can be based o
   - fixed role win rate and average score
   - processing plant and active specialty result trends
   - CPU decision counts by profile
+- Analysis outputs are written under `logs/analysis`.
 
 ### 9. Simulation GUI
 
@@ -124,3 +126,6 @@ CPU-only matches should run without the browser so balance tuning can be based o
   - generated filenames use `YYYYMMDD-HHMMSS`
   - summary/report metadata includes `generatedAt` and `timestamp`
   - individual JSONL log entries include ISO `timestamp` and local `time`
+- Folder policy:
+  - `logs/simulations`: raw simulation JSONL, simulation summaries, simulation text reports
+  - `logs/analysis`: analysis summaries and analysis text reports

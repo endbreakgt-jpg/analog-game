@@ -1,3 +1,3 @@
-logs/*.json
-logs/*.jsonl
-logs/*.txt
+logs/**/*.json
+logs/**/*.jsonl
+logs/**/*.txt

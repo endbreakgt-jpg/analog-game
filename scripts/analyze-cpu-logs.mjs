@@ -4,7 +4,8 @@ import path from 'node:path';
 import { Demands, FixedRoles, Resources, Specialties } from '../src/data.js';
 
 const DEFAULT_OPTIONS = {
-    in: 'logs/cpu-sim.jsonl',
+    in: 'logs/simulations/cpu-sim.jsonl',
+    outputDir: 'logs/analysis',
     timestamp: null,
     summary: null,
     report: null
@@ -46,8 +47,8 @@ function parseArgs(argv) {
         }
         i++;
 
-        if (['in', 'timestamp', 'summary', 'report'].includes(key)) {
-            options[key] = value;
+        if (['in', 'output-dir', 'timestamp', 'summary', 'report'].includes(key)) {
+            options[key === 'output-dir' ? 'outputDir' : key] = value;
         } else {
             throw new Error(`Unknown option --${key}`);
         }
@@ -63,8 +64,8 @@ function parseArgs(argv) {
     }
     options.timestamp = sanitizeTimestamp(options.timestamp) || formatTimestampForFile();
     options.generatedAt = new Date().toISOString();
-    options.summary ||= `logs/cpu-analysis-${options.timestamp}-summary.json`;
-    options.report ||= `logs/cpu-analysis-${options.timestamp}.txt`;
+    options.summary ||= path.join(options.outputDir, `cpu-analysis-${options.timestamp}-summary.json`);
+    options.report ||= path.join(options.outputDir, `cpu-analysis-${options.timestamp}.txt`);
 
     return options;
 }

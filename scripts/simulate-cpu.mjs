@@ -11,6 +11,7 @@ const DEFAULT_OPTIONS = {
     players: 5,
     seed: '1',
     profiles: DEFAULT_CPU_PROFILE_ID,
+    outputDir: 'logs/simulations',
     timestamp: null,
     out: null,
     summary: null,
@@ -51,8 +52,8 @@ function parseArgs(argv) {
 
         if (['games', 'players', 'max-steps'].includes(key)) {
             options[key === 'max-steps' ? 'maxSteps' : key] = Number(value);
-        } else if (['seed', 'profiles', 'timestamp', 'out', 'summary', 'report'].includes(key)) {
-            options[key] = value;
+        } else if (['seed', 'profiles', 'output-dir', 'timestamp', 'out', 'summary', 'report'].includes(key)) {
+            options[key === 'output-dir' ? 'outputDir' : key] = value;
         } else {
             throw new Error(`Unknown option --${key}`);
         }
@@ -69,9 +70,9 @@ function parseArgs(argv) {
     }
     options.timestamp = sanitizeTimestamp(options.timestamp) || formatTimestampForFile();
     options.generatedAt = new Date().toISOString();
-    options.out ||= `logs/cpu-sim-${options.timestamp}.jsonl`;
-    options.summary ||= `logs/cpu-sim-${options.timestamp}-summary.json`;
-    options.report ||= `logs/cpu-sim-${options.timestamp}.txt`;
+    options.out ||= path.join(options.outputDir, `cpu-sim-${options.timestamp}.jsonl`);
+    options.summary ||= path.join(options.outputDir, `cpu-sim-${options.timestamp}-summary.json`);
+    options.report ||= path.join(options.outputDir, `cpu-sim-${options.timestamp}.txt`);
     options.profileIds = parseProfileIds(options.profiles, options.players);
 
     return options;
